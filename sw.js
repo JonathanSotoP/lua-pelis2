@@ -169,6 +169,18 @@ const AD_DOMAINS = [
   'mixpanel.com',
   'amplitude.com',
   'heap.io',
+  'doubleclick.net',
+  'google-analytics.com',
+  'googlesyndication.com',
+  'googletagservices.com',
+  'adnxs.com',
+  'adskeeper.co.uk',
+  'cloflareinsights.com',
+  'popads.net',
+  'popcash.net',
+  'histats.com',
+  'imasdk.googleapis.com',
+  'cloudflareinsights.com',
 ];
 
 function isAdRequest(url) {

@@ -2316,6 +2316,22 @@
     </div>
   </div>
 
+  <!-- MI LISTA -->
+  <div class="continue-section" id="myListSection">
+    <div class="section-header">
+      <div class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+        Mi Lista
+      </div>
+      <button class="see-all-btn" onclick="clearMyList()">Limpiar lista</button>
+    </div>
+    <div class="carousel-wrapper">
+      <button class="carousel-arrow prev" onclick="scrollCarousel('myListCarousel',-1)">‹</button>
+      <div class="continue-carousel" id="myListCarousel"></div>
+      <button class="carousel-arrow next" onclick="scrollCarousel('myListCarousel',1)">›</button>
+    </div>
+  </div>
+
   <!-- [CINEHAX] Filtros de género -->
   <div class="genre-bar">
     <div class="genre-pill active" onclick="switchBrand('all',this)">🌐 Todo</div>
@@ -3949,6 +3965,7 @@
     },{passive:true}); // FIX PERF: passive listener no bloquea el scroll
     setupPlayerControls();
     renderContinueWatching();
+    renderMyList();
     // FIX PERF: lanzar hero y carruseles EN PARALELO — no esperar hero para empezar carruseles
     loadHero();
     loadAllCarousels();
@@ -5118,6 +5135,87 @@
   }
 
   // ================================================================
+  // MI LISTA — carrusel de favoritos en el home
+  // ================================================================
+  async function renderMyList(){
+    const sec = document.getElementById('myListSection');
+    const car = document.getElementById('myListCarousel');
+    if(!sec || !car) return;
+
+    // dpMyList puede no estar cargado aún al inicio — leerlo fresh
+    const ids = JSON.parse(safeStorage.getItem('sx_mylist') || '[]');
+    if(!ids.length){ sec.classList.remove('visible'); return; }
+
+    sec.classList.add('visible');
+    car.innerHTML = '';
+
+    // Cargar metadata de TMDB para cada ID en paralelo
+    // Intentar primero como movie, si falla como tv
+    const results = await Promise.allSettled(
+      ids.map(async id => {
+        // Intentar movie primero, luego tv
+        try {
+          const item = await tmdb(`/movie/${id}?language=${LANG}`);
+          if(item && item.id) return { item, type: 'movie' };
+        } catch(e){}
+        const item = await tmdb(`/tv/${id}?language=${LANG}`);
+        return { item, type: 'tv' };
+      })
+    );
+
+    results.forEach((r, i) => {
+      if(r.status !== 'fulfilled') return;
+      const { item, type } = r.value;
+      if(!item || !item.id) return;
+      const id = ids[i];
+      car.appendChild(buildMyListCard(item, type, id));
+    });
+
+    if(!car.children.length) sec.classList.remove('visible');
+  }
+
+  function buildMyListCard(item, type, id){
+    const div = document.createElement('div');
+    div.className = 'continue-card';
+    const title = item.title || item.name || '';
+    const poster = item.poster_path ? `${IMG}${IMG_SIZE}${item.poster_path}` : '';
+    const year = (item.release_date || item.first_air_date || '').slice(0,4);
+    div.innerHTML = `
+      ${poster
+        ? `<img src="${poster}" alt="${escapeHtml(title)}" loading="lazy" decoding="async">`
+        : `<div style="width:100%;height:100%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:.7rem;text-align:center;padding:8px;color:var(--text-dim)">${escapeHtml(title)}</div>`
+      }
+      <button class="continue-card-remove" title="Quitar de Mi Lista"
+        onclick="event.stopPropagation();removeMyListItem('${id}',this.closest('.continue-card'))">✕</button>
+      <div class="continue-card-overlay">
+        <div class="continue-card-title">${escapeHtml(title)}</div>
+        <div class="continue-card-sub" style="color:var(--accent);font-weight:600">${type==='tv'?'Serie':'Película'}${year?' · '+year:''}</div>
+      </div>`;
+    div.onclick = () => showDetailPage(id, type);
+    return div;
+  }
+
+  function removeMyListItem(id, cardEl){
+    const sid = String(id);
+    dpMyList = dpMyList.filter(x => x !== sid);
+    safeStorage.setItem('sx_mylist', JSON.stringify(dpMyList));
+    if(cardEl) cardEl.remove();
+    const car = document.getElementById('myListCarousel');
+    if(car && !car.children.length) document.getElementById('myListSection')?.classList.remove('visible');
+    showToast('Eliminado de Mi Lista');
+  }
+
+  function clearMyList(){
+    if(!confirm('¿Vaciar Mi Lista?')) return;
+    dpMyList = [];
+    safeStorage.setItem('sx_mylist', JSON.stringify([]));
+    const car = document.getElementById('myListCarousel');
+    if(car) car.innerHTML = '';
+    document.getElementById('myListSection')?.classList.remove('visible');
+    showToast('Mi Lista vaciada');
+  }
+
+  // ================================================================
   // REPRODUCTOR — con progreso + auto-next ARREGLADO
   // ================================================================
 
@@ -6091,6 +6189,8 @@
     safeStorage.setItem('sx_mylist',JSON.stringify(dpMyList));
     const btn=document.getElementById('dpListBtn');
     if(btn){const inList=dpMyList.includes(sid);btn.textContent=inList?'✓ En Mi Lista':'+ Mi Lista';btn.classList.toggle('added',inList);}
+    // Refrescar carrusel en el home
+    renderMyList();
   }
 
   function dpOpenTM(key){document.getElementById('dpTrailerFrame').src=`https://www.youtube.com/embed/${key}?autoplay=1`;document.getElementById('dpTrailerModal').classList.add('open');}
