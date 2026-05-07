@@ -4,27 +4,62 @@
   <!-- 🛡️ ESCUDO ANTI-ANUNCIOS — debe ejecutarse PRIMERO, antes de todo -->
   <script>
     (function() {
+      // Bloquear window.open — impide popups y tabs de anuncios
       var _origOpen = window.open;
       window.open = function(url, name, specs) {
         if (!url) return null;
-        // Permitir solo links internos (misma página)
         try {
           var sameOrigin = url.startsWith('/') || url.startsWith('#') ||
                            url.includes(window.location.hostname);
           if (sameOrigin) return _origOpen.apply(window, arguments);
         } catch(e) {}
         console.warn('🛡️ Escudo: popup bloqueado ->', url);
-        return null;
+        return { focus: function(){}, close: function(){}, closed: false };
       };
-      // Propagar el escudo al contexto padre (por si el iframe intenta usar window.parent.open)
+      // Propagar al contexto padre
       try { window.parent.open = window.open; } catch(e) {}
+
+      // Bloquear window.alert y confirm de iframes de ads
+      var _origAlert = window.alert;
+      window.alert = function(msg) {
+        if(msg && String(msg).length < 5) return; // bloquear alertas vacías de ads
+        _origAlert.apply(window, arguments);
+      };
+
+      // Bloquear intentos de redirección via location
+      var _adDomains = [
+        'doubleclick','googlesyndication','adnxs','exoclick','adsterra',
+        'popads','popcash','propellerads','trafficjunky','adstag',
+        'imasdk.googleapis','adskeeper','histats','cloudflareinsights'
+      ];
+      var _origAssign = window.location.assign.bind(window.location);
+      var _origReplace = window.location.replace.bind(window.location);
+      function _isAdUrl(url) {
+        if(!url) return false;
+        var u = String(url).toLowerCase();
+        return _adDomains.some(function(d){ return u.includes(d); });
+      }
+      try {
+        Object.defineProperty(window.location, 'href', {
+          set: function(url) {
+            if(_isAdUrl(url)) { console.warn('🛡️ Redirección bloqueada:', url); return; }
+            window.location.assign(url);
+          }
+        });
+      } catch(e) {}
+
+      // Bloquear MutationObserver de ads que inyectan iframes
+      var _origMO = window.MutationObserver;
+      // No bloquear MutationObserver del todo — solo marcar para el killAds
+
+      // Bloquear eventos de visibilidad que usan los ads para detectar clicks
+      document.addEventListener('visibilitychange', function(e) {
+        if(document.hidden) {
+          setTimeout(function(){ try{ window.focus(); }catch(e){} }, 50);
+        }
+      }, true);
+
     })();
-    // Registrar Service Worker anti-ads
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js')
-        .then(() => console.log('🛡️ SW anti-ads activo'))
-        .catch(() => {});
-    }
   </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -34,8 +69,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://api.themoviedb.org">
   <link rel="preconnect" href="https://image.tmdb.org">
-  <!-- Preconectar al servidor de video — establece TCP+TLS ANTES del clic del usuario -->
-  <!-- Esto ahorra 300-800ms de handshake cuando abre el reproductor -->
+  <!-- Preconectar a Vimeus — establece TCP+TLS ANTES del clic del usuario -->
   <link rel="preconnect" href="https://vimeus.com" crossorigin>
   <link rel="dns-prefetch" href="https://vimeus.com">
   <!-- Preconectar a la API TVLibre — establece TCP+TLS antes de la petición -->
@@ -54,6 +88,12 @@
   <!-- Detección instantánea de plataforma — corre ANTES de renderizar nada -->
   <script>
     (function(){
+      // ── Override desde APK: ?mode=tv fuerza TV sin importar el User Agent ──
+      if (window.location.search.includes('mode=tv')) {
+        document.documentElement.classList.add('tv-mode');
+        return;
+      }
+
       var ua       = navigator.userAgent.toLowerCase();
       var dpr      = window.devicePixelRatio || 1;
       var w        = screen.width, h = screen.height;
@@ -66,7 +106,6 @@
       var isTV      = /smart-tv|smarttv|googletv|appletv|hbbtv|webos|tizen|netcast|viera|bravia|roku|lgtv/.test(ua)
                     || (!hasTouch && !isAndroid && w >= 1280 && (w/h) > 1.6 && dpr <= 1.5);
       var isDesktop = !hasTouch && !isAndroid && !isIOS && !isMobileUA && !isTV;
-
       if(isTV){
         document.documentElement.classList.add('tv-mode');
       } else if(isDesktop){
@@ -848,15 +887,156 @@
       background: transparent; cursor: pointer;
       pointer-events: none;
     }
-    /* clickShield activo: absorbe el primer clic anti-ad */
-    #playerClickOverlay.ad-shield {
-      pointer-events: auto;
-      z-index: 15;
-    }
     .player-page.controls-hidden #playerClickOverlay {
       pointer-events: auto;
     }
     .player-page.controls-hidden .player-frame-wrap { cursor: none; }
+
+    /* ================================================================
+       PANEL LATERAL DE EPISODIOS
+       ================================================================ */
+    .ep-side-panel {
+      position: absolute;
+      top: 0; right: 0;
+      width: 380px; height: 100%;
+      background: rgba(14,14,14,0.97);
+      border-left: 1px solid rgba(232,185,74,0.15);
+      flex-direction: column;
+      z-index: 20;
+      display: none;
+      backdrop-filter: blur(12px);
+    }
+    .ep-side-panel.open { display: flex; }
+    .ep-side-panel-header {
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: flex; align-items: flex-start;
+      justify-content: space-between; gap: 12px; flex-shrink: 0;
+    }
+    .ep-side-panel-title {
+      font-family: 'Oswald', sans-serif;
+      font-size: 1rem; font-weight: 600;
+      color: var(--text); line-height: 1.2;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .ep-side-panel-sub {
+      font-family: 'Roboto', sans-serif;
+      font-size: 0.7rem; color: var(--text-muted);
+      font-weight: 400; margin-top: 2px;
+    }
+    .ep-side-close {
+      background: none; border: none;
+      color: var(--text-muted); cursor: pointer;
+      font-size: 1.1rem; padding: 2px 6px;
+      border-radius: var(--radius);
+      transition: color var(--trans);
+      flex-shrink: 0; line-height: 1;
+    }
+    .ep-side-close:hover { color: var(--text); }
+    .ep-side-seasons {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px; padding: 10px 18px;
+      max-height: 132px;
+      overflow-y: auto; scrollbar-width: thin;
+      scrollbar-color: var(--surface3) transparent;
+      flex-shrink: 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .ep-side-seasons::-webkit-scrollbar { width: 3px; }
+    .ep-side-seasons::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
+    .ep-season-btn {
+      padding: 5px 8px;
+      border-radius: var(--radius); border: 1px solid var(--border);
+      background: var(--surface); color: var(--text-muted);
+      font-size: 0.72rem; font-weight: 600; cursor: pointer;
+      transition: all var(--trans); white-space: nowrap;
+      font-family: 'Roboto', sans-serif; text-align: center;
+    }
+    .ep-season-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .ep-season-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
+    .ep-side-list {
+      flex: 1; overflow-y: auto; padding: 8px 10px;
+      scrollbar-width: thin; scrollbar-color: var(--surface3) transparent;
+    }
+    .ep-side-list::-webkit-scrollbar { width: 4px; }
+    .ep-side-list::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
+    .ep-side-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px; border-radius: var(--radius-lg);
+      cursor: pointer; transition: background var(--trans);
+      border: 2px solid transparent; margin-bottom: 4px;
+    }
+    .ep-side-item:hover { background: var(--surface2); }
+    .ep-side-item.active { background: rgba(232,185,74,0.12); border-color: var(--accent); }
+    .ep-side-thumb {
+      flex-shrink: 0; width: 96px; height: 54px;
+      border-radius: var(--radius); overflow: hidden;
+      background: var(--surface2); position: relative;
+    }
+    .ep-side-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ep-side-thumb-play {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.45); opacity: 0;
+      transition: opacity var(--trans); font-size: 1rem; color: #fff;
+    }
+    .ep-side-item:hover .ep-side-thumb-play,
+    .ep-side-item.active .ep-side-thumb-play { opacity: 1; }
+    .ep-side-item.active .ep-side-thumb-play { background: rgba(232,185,74,0.3); }
+    .ep-side-dot {
+      position: absolute; top: 4px; left: 4px;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent); display: none;
+    }
+    .ep-side-item.active .ep-side-dot { display: block; }
+    .ep-side-info { flex: 1; min-width: 0; }
+    .ep-side-ep-num { font-size: 0.62rem; color: var(--accent); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 2px; }
+    .ep-side-ep-name { font-size: 0.78rem; font-weight: 600; color: var(--text); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ep-side-ep-desc { font-size: 0.67rem; color: var(--text-muted); line-height: 1.4; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+    /* Botón para abrir el panel */
+    .ep-panel-toggle {
+      display: none;
+      align-items: center; gap: 7px;
+      background: rgba(232,185,74,0.92); color: #000;
+      border: none; border-radius: 20px;
+      padding: 6px 13px 6px 10px; flex-shrink: 0;
+      font-family: 'Roboto', sans-serif; font-weight: 700;
+      font-size: 0.76rem; cursor: pointer;
+      transition: opacity 0.3s ease, transform 0.2s ease, background 0.2s ease;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+      opacity: 1;
+    }
+    .ep-panel-toggle:hover { background: var(--accent2); transform: scale(1.04); }
+    .ep-panel-toggle svg { width: 14px; height: 14px; }
+    /* Visible solo cuando hay serie Y los controles están visibles */
+    .ep-panel-toggle.visible { display: flex; }
+    .player-page.controls-hidden .ep-panel-toggle { opacity: 0; pointer-events: none; }
+
+    /* Botones prev/next flotantes */
+    .ep-quick-prev, .ep-quick-next {
+      position: absolute; bottom: 16px; z-index: 25;
+      background: rgba(14,14,14,0.88); color: var(--text);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 20px; padding: 7px 16px;
+      font-family: 'Roboto', sans-serif;
+      font-weight: 600; font-size: 0.78rem;
+      cursor: pointer;
+      transition: opacity 0.3s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      display: none;
+      opacity: 1;
+    }
+    .ep-quick-prev { left: 16px; }
+    .ep-quick-next { right: 16px; }
+    .ep-quick-prev.visible, .ep-quick-next.visible { display: block; }
+    /* Ocultar con los controles — transición suave */
+    .player-page.controls-hidden .ep-quick-prev,
+    .player-page.controls-hidden .ep-quick-next { opacity: 0; pointer-events: none; }
+    .ep-quick-prev:hover, .ep-quick-next:hover { background: var(--surface3); border-color: var(--accent); color: var(--accent); }
+    @media (max-width: 600px) {
+      .ep-side-panel { width: 100%; border-left: none; border-top: 1px solid rgba(232,185,74,0.15); }
+    }
     .player-page:not(.controls-hidden) .player-frame-wrap { cursor: default; }
 
     /* Indicador sutil cuando los controles están ocultos */
@@ -957,169 +1137,6 @@
       pointer-events: none;
     }
     /* Fila única horizontal con todos los controles */
-
-    /* ================================================================
-       PANEL LATERAL DE EPISODIOS — Estilo ZanderTV (panel derecho)
-       ================================================================ */
-    .ep-side-panel {
-      position: absolute;
-      top: 0; right: 0;
-      width: 380px; height: 100%;
-      background: rgba(14,14,14,0.97);
-      border-left: 1px solid rgba(232,185,74,0.15);
-      flex-direction: column;
-      z-index: 20;
-      display: none;
-      backdrop-filter: blur(12px);
-    }
-    .ep-side-panel.open { display: flex; }
-
-    .ep-side-panel-header {
-      padding: 16px 18px 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      display: flex; align-items: flex-start;
-      justify-content: space-between; gap: 12px; flex-shrink: 0;
-    }
-    .ep-side-panel-title {
-      font-family: 'Oswald', sans-serif;
-      font-size: 1rem; font-weight: 600;
-      color: var(--text); line-height: 1.2;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .ep-side-panel-sub {
-      font-family: 'Roboto', sans-serif;
-      font-size: 0.7rem; color: var(--text-muted);
-      font-weight: 400; margin-top: 2px;
-    }
-    .ep-side-close {
-      background: none; border: none;
-      color: var(--text-muted); cursor: pointer;
-      font-size: 1.1rem; padding: 2px 6px;
-      border-radius: var(--radius);
-      transition: color var(--trans);
-      flex-shrink: 0; line-height: 1;
-    }
-    .ep-side-close:hover { color: var(--text); }
-
-    .ep-side-seasons {
-      display: flex; gap: 6px; padding: 10px 18px;
-      overflow-x: auto; scrollbar-width: none; flex-shrink: 0;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-    }
-    .ep-side-seasons::-webkit-scrollbar { display: none; }
-    .ep-season-btn {
-      flex-shrink: 0; padding: 5px 14px;
-      border-radius: 20px; border: 1px solid var(--border);
-      background: var(--surface); color: var(--text-muted);
-      font-size: 0.75rem; font-weight: 600; cursor: pointer;
-      transition: all var(--trans); white-space: nowrap;
-      font-family: 'Roboto', sans-serif;
-    }
-    .ep-season-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .ep-season-btn.active {
-      background: var(--accent); color: #000;
-      border-color: var(--accent); font-weight: 700;
-    }
-
-    .ep-side-list {
-      flex: 1; overflow-y: auto; padding: 8px 10px;
-      scrollbar-width: thin; scrollbar-color: var(--surface3) transparent;
-    }
-    .ep-side-list::-webkit-scrollbar { width: 4px; }
-    .ep-side-list::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
-
-    .ep-side-item {
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px; border-radius: var(--radius-lg);
-      cursor: pointer; transition: background var(--trans);
-      border: 2px solid transparent; margin-bottom: 4px;
-    }
-    .ep-side-item:hover { background: var(--surface2); }
-    .ep-side-item.active {
-      background: rgba(232,185,74,0.12);
-      border-color: var(--accent);
-    }
-    .ep-side-thumb {
-      flex-shrink: 0; width: 96px; height: 54px;
-      border-radius: var(--radius); overflow: hidden;
-      background: var(--surface2); position: relative;
-    }
-    .ep-side-thumb img {
-      width: 100%; height: 100%; object-fit: cover; display: block;
-    }
-    .ep-side-thumb-play {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.45); opacity: 0;
-      transition: opacity var(--trans); font-size: 1rem; color: #fff;
-    }
-    .ep-side-item:hover .ep-side-thumb-play,
-    .ep-side-item.active .ep-side-thumb-play { opacity: 1; }
-    .ep-side-item.active .ep-side-thumb-play { background: rgba(232,185,74,0.3); }
-    .ep-side-dot {
-      position: absolute; top: 4px; left: 4px;
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--accent); display: none;
-    }
-    .ep-side-item.active .ep-side-dot { display: block; }
-
-    .ep-side-info { flex: 1; min-width: 0; }
-    .ep-side-ep-num {
-      font-size: 0.62rem; color: var(--accent);
-      font-weight: 700; letter-spacing: 0.5px;
-      text-transform: uppercase; margin-bottom: 2px;
-    }
-    .ep-side-ep-name {
-      font-size: 0.78rem; font-weight: 600;
-      color: var(--text); line-height: 1.3;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .ep-side-ep-desc {
-      font-size: 0.67rem; color: var(--text-muted);
-      line-height: 1.4; margin-top: 2px;
-      display: -webkit-box; -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical; overflow: hidden;
-    }
-
-    /* Botón para abrir el panel — reemplaza los controles de abajo */
-    .ep-panel-toggle {
-      display: none; /* solo visible en series */
-      align-items: center; gap: 7px;
-      background: rgba(232,185,74,0.92); color: #000;
-      border: none; border-radius: 20px;
-      padding: 6px 13px 6px 10px; flex-shrink: 0;
-      font-family: 'Roboto', sans-serif; font-weight: 700;
-      font-size: 0.76rem; cursor: pointer;
-      transition: all var(--trans);
-      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
-    }
-    .ep-panel-toggle:hover { background: var(--accent2); transform: scale(1.04); }
-    .ep-panel-toggle svg { width: 14px; height: 14px; }
-    .ep-panel-toggle.visible { display: flex; }
-
-    /* Botón sig. ep simplificado (sin los controles de abajo) */
-    .ep-quick-prev, .ep-quick-next {
-      position: absolute; bottom: 16px; z-index: 25;
-      background: rgba(14,14,14,0.88); color: var(--text);
-      border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 20px; padding: 7px 16px;
-      font-family: 'Roboto', sans-serif;
-      font-weight: 600; font-size: 0.78rem;
-      cursor: pointer; transition: all var(--trans);
-      display: none;
-    }
-    .ep-quick-prev { left: 16px; }
-    .ep-quick-next { right: 16px; }
-    .ep-quick-prev.visible, .ep-quick-next.visible { display: block; }
-    .ep-quick-prev:hover, .ep-quick-next:hover {
-      background: var(--surface3); border-color: var(--accent); color: var(--accent);
-    }
-    /* En mobile el panel ocupa todo el ancho */
-    @media (max-width: 600px) {
-      .ep-side-panel { width: 100%; border-left: none; border-top: 1px solid rgba(232,185,74,0.15); }
-      .ep-side-panel.open { display: flex; }
-    }
-
     .ep-controls-row {
       display: flex; align-items: center; gap: 8px;
       pointer-events: auto;
@@ -1538,170 +1555,7 @@
       }
       /* Controles de episodio — móvil */
       .player-bottom { padding: 20px 0 14px; }
-  
-    /* ================================================================
-       PANEL LATERAL DE EPISODIOS — Estilo ZanderTV (panel derecho)
-       ================================================================ */
-    .ep-side-panel {
-      position: absolute;
-      top: 0; right: 0;
-      width: 380px; height: 100%;
-      background: rgba(14,14,14,0.97);
-      border-left: 1px solid rgba(232,185,74,0.15);
-      flex-direction: column;
-      z-index: 20;
-      display: none;
-      backdrop-filter: blur(12px);
-    }
-    .ep-side-panel.open { display: flex; }
-
-    .ep-side-panel-header {
-      padding: 16px 18px 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      display: flex; align-items: flex-start;
-      justify-content: space-between; gap: 12px; flex-shrink: 0;
-    }
-    .ep-side-panel-title {
-      font-family: 'Oswald', sans-serif;
-      font-size: 1rem; font-weight: 600;
-      color: var(--text); line-height: 1.2;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .ep-side-panel-sub {
-      font-family: 'Roboto', sans-serif;
-      font-size: 0.7rem; color: var(--text-muted);
-      font-weight: 400; margin-top: 2px;
-    }
-    .ep-side-close {
-      background: none; border: none;
-      color: var(--text-muted); cursor: pointer;
-      font-size: 1.1rem; padding: 2px 6px;
-      border-radius: var(--radius);
-      transition: color var(--trans);
-      flex-shrink: 0; line-height: 1;
-    }
-    .ep-side-close:hover { color: var(--text); }
-
-    .ep-side-seasons {
-      display: flex; gap: 6px; padding: 10px 18px;
-      overflow-x: auto; scrollbar-width: none; flex-shrink: 0;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-    }
-    .ep-side-seasons::-webkit-scrollbar { display: none; }
-    .ep-season-btn {
-      flex-shrink: 0; padding: 5px 14px;
-      border-radius: 20px; border: 1px solid var(--border);
-      background: var(--surface); color: var(--text-muted);
-      font-size: 0.75rem; font-weight: 600; cursor: pointer;
-      transition: all var(--trans); white-space: nowrap;
-      font-family: 'Roboto', sans-serif;
-    }
-    .ep-season-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .ep-season-btn.active {
-      background: var(--accent); color: #000;
-      border-color: var(--accent); font-weight: 700;
-    }
-
-    .ep-side-list {
-      flex: 1; overflow-y: auto; padding: 8px 10px;
-      scrollbar-width: thin; scrollbar-color: var(--surface3) transparent;
-    }
-    .ep-side-list::-webkit-scrollbar { width: 4px; }
-    .ep-side-list::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
-
-    .ep-side-item {
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px; border-radius: var(--radius-lg);
-      cursor: pointer; transition: background var(--trans);
-      border: 2px solid transparent; margin-bottom: 4px;
-    }
-    .ep-side-item:hover { background: var(--surface2); }
-    .ep-side-item.active {
-      background: rgba(232,185,74,0.12);
-      border-color: var(--accent);
-    }
-    .ep-side-thumb {
-      flex-shrink: 0; width: 96px; height: 54px;
-      border-radius: var(--radius); overflow: hidden;
-      background: var(--surface2); position: relative;
-    }
-    .ep-side-thumb img {
-      width: 100%; height: 100%; object-fit: cover; display: block;
-    }
-    .ep-side-thumb-play {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.45); opacity: 0;
-      transition: opacity var(--trans); font-size: 1rem; color: #fff;
-    }
-    .ep-side-item:hover .ep-side-thumb-play,
-    .ep-side-item.active .ep-side-thumb-play { opacity: 1; }
-    .ep-side-item.active .ep-side-thumb-play { background: rgba(232,185,74,0.3); }
-    .ep-side-dot {
-      position: absolute; top: 4px; left: 4px;
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--accent); display: none;
-    }
-    .ep-side-item.active .ep-side-dot { display: block; }
-
-    .ep-side-info { flex: 1; min-width: 0; }
-    .ep-side-ep-num {
-      font-size: 0.62rem; color: var(--accent);
-      font-weight: 700; letter-spacing: 0.5px;
-      text-transform: uppercase; margin-bottom: 2px;
-    }
-    .ep-side-ep-name {
-      font-size: 0.78rem; font-weight: 600;
-      color: var(--text); line-height: 1.3;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .ep-side-ep-desc {
-      font-size: 0.67rem; color: var(--text-muted);
-      line-height: 1.4; margin-top: 2px;
-      display: -webkit-box; -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical; overflow: hidden;
-    }
-
-    /* Botón para abrir el panel — reemplaza los controles de abajo */
-    .ep-panel-toggle {
-      display: none; /* solo visible en series */
-      align-items: center; gap: 7px;
-      background: rgba(232,185,74,0.92); color: #000;
-      border: none; border-radius: 20px;
-      padding: 6px 13px 6px 10px; flex-shrink: 0;
-      font-family: 'Roboto', sans-serif; font-weight: 700;
-      font-size: 0.76rem; cursor: pointer;
-      transition: all var(--trans);
-      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
-    }
-    .ep-panel-toggle:hover { background: var(--accent2); transform: scale(1.04); }
-    .ep-panel-toggle svg { width: 14px; height: 14px; }
-    .ep-panel-toggle.visible { display: flex; }
-
-    /* Botón sig. ep simplificado (sin los controles de abajo) */
-    .ep-quick-prev, .ep-quick-next {
-      position: absolute; bottom: 16px; z-index: 25;
-      background: rgba(14,14,14,0.88); color: var(--text);
-      border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 20px; padding: 7px 16px;
-      font-family: 'Roboto', sans-serif;
-      font-weight: 600; font-size: 0.78rem;
-      cursor: pointer; transition: all var(--trans);
-      display: none;
-    }
-    .ep-quick-prev { left: 16px; }
-    .ep-quick-next { right: 16px; }
-    .ep-quick-prev.visible, .ep-quick-next.visible { display: block; }
-    .ep-quick-prev:hover, .ep-quick-next:hover {
-      background: var(--surface3); border-color: var(--accent); color: var(--accent);
-    }
-    /* En mobile el panel ocupa todo el ancho */
-    @media (max-width: 600px) {
-      .ep-side-panel { width: 100%; border-left: none; border-top: 1px solid rgba(232,185,74,0.15); }
-      .ep-side-panel.open { display: flex; }
-    }
-
-    .ep-controls-row { gap: 4px; flex-wrap: wrap; justify-content: center; }
+      .ep-controls-row { gap: 4px; flex-wrap: wrap; justify-content: center; }
       .ep-select { min-width: 96px; font-size: 0.69rem; padding: 5px 22px 5px 8px; }
       .ep-label { font-size: 0.58rem; }
       .ep-sep { display: none; }
@@ -2138,7 +1992,8 @@
     .server-btn { padding:8px 16px; border-radius:var(--radius); background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); font-size:0.8rem; font-weight:600; transition:var(--trans); cursor:pointer; }
     .server-btn:hover { border-color:var(--accent); color:var(--text); }
     .server-btn.active { background:var(--accent); border-color:transparent; color:var(--bg); }
-  </style></head>
+  </style>
+</head>
 <body>
 
 <!-- ============================================================
@@ -2203,6 +2058,13 @@
   <button class="tv-nav-item" onclick="openTvSearchBar();closeTvSidebar()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
     <span>Buscar</span>
+  </button>
+  <div class="tv-sidebar-sep"></div>
+  <button class="tv-nav-item" id="tvNavPuntero" onclick="window.__toggleCursorMode()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M4 4l7 18 3-7 7-3z"/>
+    </svg>
+    <span id="tvNavPunteroLabel">🖱 Habilitar Puntero</span>
   </button>
 </aside>
 
@@ -3289,12 +3151,9 @@
     <div class="ep-side-seasons" id="epSideSeasons"></div>
     <div class="ep-side-list" id="epSideList"></div>
   </div>
-
-
-  <!-- Botones anteriores/siguiente simplificados -->
+  <!-- Botones anteriores/siguiente flotantes -->
   <button class="ep-quick-prev" id="epQuickPrev" onclick="prevEpisode()">‹ Anterior</button>
   <button class="ep-quick-next" id="epQuickNext" onclick="nextEpisode()">Siguiente ›</button>
-
   <div class="player-bottom" id="playerBottom" style="display:none"></div>
 </div>
 
@@ -3324,7 +3183,7 @@
   // ================================================================
   // CONFIGURACIÓN
   // ================================================================
-  const TMDB_KEY = '5dd50c688b8056aa2e1ad9a022d879a0';
+  const TMDB_KEY = 'd95e6a7e2ead40e949fcdb81f1f26f0b';
   const LANG     = 'es-MX';
   const TMDB     = 'https://api.themoviedb.org/3';
   const IMG      = 'https://image.tmdb.org/t/p/';
@@ -3548,7 +3407,7 @@
   };
 
   // ================================================================
-  // FUENTES — Vimeus
+  // FUENTES — Solo StreanMix (UnlimPlay)
   // ================================================================
   const VIMEUS_VIEW_KEY = '9KIno5NJkhlCwt5fxJvFO8s43MJE6RuZM5MrPRI3678';
   const VIMEUS_BASE = 'https://vimeus.com';
@@ -3557,7 +3416,7 @@
     return `${VIMEUS_BASE}/e/movie?tmdb=${tmdbId}&view_key=${VIMEUS_VIEW_KEY}&autoplay=1&primary_color=e8b94a`;
   }
   function _vimeusTvUrl(tmdbId, s, e){
-    const endpoint = _dpIsAnime ? 'anime' : 'serie';
+    const endpoint = 'serie';
     return `${VIMEUS_BASE}/e/${endpoint}?tmdb=${tmdbId}&se=${s}&ep=${e}&view_key=${VIMEUS_VIEW_KEY}&autoplay=1&primary_color=e8b94a`;
   }
 
@@ -3965,7 +3824,6 @@
     },{passive:true}); // FIX PERF: passive listener no bloquea el scroll
     setupPlayerControls();
     renderContinueWatching();
-    renderMyList();
     // FIX PERF: lanzar hero y carruseles EN PARALELO — no esperar hero para empezar carruseles
     loadHero();
     loadAllCarousels();
@@ -4033,30 +3891,18 @@
     const topbar   = page.querySelector('.player-topbar');
     const bottomEl = document.getElementById('playerBottom');
     const overlay  = document.getElementById('playerClickOverlay');
-    const HIDE_MS  = 4000;
+    const HIDE_MS  = 5000; // 5 segundos de inactividad
 
-    // En TV: controles visibles pero con toggle manual
-    // FIX ANDROID TV: Ya NO retornamos temprano — agregamos touch handling para TV
     const isTV = document.documentElement.classList.contains('tv-mode');
     if(isTV) {
       page.classList.remove('controls-hidden');
       _tvControlsHidden = false;
-
-      // FIX ANDROID TV: Touch en el iframe → alternar controles
-      // Cuando los controles están OCULTOS, el usuario puede interactuar
-      // con el reproductor del iframe (YouTube, UnlimPlay, etc.)
       page.addEventListener('touchstart', (e)=>{
-        // No alternar si el toque es en un botón de los controles
         if(e.target.closest('.player-topbar *, .player-bottom *, .source-selector *, .tv-toggle-controls, .autonext-banner, .player-back, #btnFullscreen')) return;
-        // Si toca el iframe/video area → alternar controles
         tvTogglePlayerControls();
       },{passive:true});
-
-      // FIX ANDROID TV: Click (cursor virtual) en el iframe → alternar controles
       page.addEventListener('click', (e)=>{
-        // No alternar si el click es en un botón de los controles
         if(e.target.closest('.player-topbar *, .player-bottom *, .source-selector *, .tv-toggle-controls, .autonext-banner, .player-back, #btnFullscreen')) return;
-        // Si el cursor virtual hace click en el área del iframe/video
         if(e.target.closest('.player-frame-wrap') || e.target.id === 'playerClickOverlay'){
           tvTogglePlayerControls();
         }
@@ -4065,15 +3911,15 @@
 
     function showControls(){
       page.classList.remove('controls-hidden');
-      if (isTV) {
+      if(isTV){
         _tvControlsHidden = false;
         const label = document.getElementById('tvToggleLabel');
-        if (label) label.textContent = 'Ocultar controles';
+        if(label) label.textContent = 'Ocultar controles';
       }
       clearTimeout(controlsHideTimeout);
-      controlsHideTimeout = setTimeout(()=> {
+      controlsHideTimeout = setTimeout(()=>{
         page.classList.add('controls-hidden');
-        if (isTV) _tvControlsHidden = true;
+        if(isTV) _tvControlsHidden = true;
       }, HIDE_MS);
     }
     window.showControls = showControls;
@@ -4081,19 +3927,18 @@
     function hideControlsNow(){
       clearTimeout(controlsHideTimeout);
       page.classList.add('controls-hidden');
-      if (isTV) _tvControlsHidden = true;
+      if(isTV) _tvControlsHidden = true;
     }
     window.hideControlsNow = hideControlsNow;
 
-
-    // Mousemove sobre el player (topbar / bottombar / bordes) → mostrar controles
+    // Mousemove → mostrar controles (ocultar a los 5s de inactividad)
     page.addEventListener('mousemove', showControls);
 
-    // Hover sobre topbar o bottombar → suspender el timer mientras se está encima
+    // Hover sobre topbar/bottom → no ocultar mientras el mouse esté encima
     [topbar, bottomEl].forEach(el => {
       if(!el) return;
       el.addEventListener('mouseenter', ()=> clearTimeout(controlsHideTimeout));
-      el.addEventListener('mouseleave', ()=> {
+      el.addEventListener('mouseleave', ()=>{
         controlsHideTimeout = setTimeout(()=> page.classList.add('controls-hidden'), HIDE_MS);
       });
     });
@@ -4101,7 +3946,7 @@
     // Mouse sale del player → ocultar de inmediato
     page.addEventListener('mouseleave', hideControlsNow);
 
-    // Overlay sobre el iframe: clic cuando controles están ocultos → mostrar
+    // Click en overlay (iframe oculto) → mostrar controles
     if(overlay){
       overlay.addEventListener('click', (e)=>{
         e.stopPropagation();
@@ -4109,15 +3954,83 @@
       });
     }
 
-    // Touch: tap sobre el video → alternar visibilidad
+    // Touch: tap sobre video → alternar
     page.addEventListener('touchstart', (e)=>{
       if(e.target.closest('.player-topbar, .player-bottom, .ep-controls-row, .autonext-banner')) return;
-      if(page.classList.contains('controls-hidden')){
-        showControls();
-      } else {
-        hideControlsNow();
-      }
+      if(page.classList.contains('controls-hidden')){ showControls(); }
+      else { hideControlsNow(); }
     },{passive:true});
+
+    // ── SCROLL DEL PANEL DE EPISODIOS con el movimiento del mouse ──────
+    // Cuando el panel está abierto:
+    // - Si el mouse está DENTRO del panel: scroll según posición Y dentro del panel
+    //   (zona superior 25% → sube, zona inferior 25% → baja)
+    // - Si el mouse está FUERA del panel (en el video): no hacer nada
+    let _scrollRaf = null;
+    let _scrollVel = 0;
+
+    page.addEventListener('mousemove', function(e){
+      const panel = document.getElementById('epSidePanel');
+      if(!panel || !panel.classList.contains('open')) {
+        _scrollVel = 0;
+        return;
+      }
+
+      const list = document.getElementById('epSideList');
+      if(!list) return;
+
+      const panelRect = panel.getBoundingClientRect();
+      const onPanel = (e.clientX >= panelRect.left && e.clientX <= panelRect.right &&
+                       e.clientY >= panelRect.top  && e.clientY <= panelRect.bottom);
+
+      if(!onPanel) {
+        // Mouse fuera del panel → parar scroll
+        _scrollVel = 0;
+        return;
+      }
+
+      // Posición Y relativa dentro del panel
+      const relY   = e.clientY - panelRect.top;
+      const relH   = panelRect.height;
+      const ZONE   = relH * 0.25; // 25% superior y 25% inferior
+
+      if(relY < ZONE) {
+        // Zona superior → scroll hacia arriba (más intenso cuanto más arriba)
+        const intensity = 1 - (relY / ZONE);
+        _scrollVel = -Math.round(intensity * 14 + 2);
+      } else if(relY > relH - ZONE) {
+        // Zona inferior → scroll hacia abajo (más intenso cuanto más abajo)
+        const intensity = (relY - (relH - ZONE)) / ZONE;
+        _scrollVel = Math.round(intensity * 14 + 2);
+      } else {
+        // Zona central → sin scroll automático
+        _scrollVel = 0;
+      }
+
+      if(_scrollVel !== 0 && !_scrollRaf) {
+        const doScroll = () => {
+          const l = document.getElementById('epSideList');
+          const p = document.getElementById('epSidePanel');
+          if(!l || !p || !p.classList.contains('open')) {
+            _scrollRaf = null; _scrollVel = 0; return;
+          }
+          l.scrollTop += _scrollVel;
+          if(l.scrollTop <= 0) l.scrollTop = 0;
+          if(_scrollVel !== 0) {
+            _scrollRaf = requestAnimationFrame(doScroll);
+          } else {
+            _scrollRaf = null;
+          }
+        };
+        _scrollRaf = requestAnimationFrame(doScroll);
+      }
+    });
+
+    // Parar scroll al salir del player o del panel
+    page.addEventListener('mouseleave', function(){
+      _scrollVel = 0;
+      if(_scrollRaf) { cancelAnimationFrame(_scrollRaf); _scrollRaf = null; }
+    });
   }
 
   // ================================================================
@@ -4897,8 +4810,10 @@
     else{showToast('No hay fuentes disponibles');return;}
     if(window.hlsInstance){window.hlsInstance.destroy();window.hlsInstance=null;}
     document.getElementById('playerPage').classList.add('active');
-    // FIX ANDROID TV: resetear controles al abrir canal
-    document.getElementById('playerPage').classList.remove('controls-hidden');
+    // Arrancar con controles ocultos en desktop/web
+    const _isTVch = document.documentElement.classList.contains('tv-mode');
+    if(!_isTVch){ document.getElementById('playerPage').classList.add('controls-hidden'); }
+    else { document.getElementById('playerPage').classList.remove('controls-hidden'); }
     _tvControlsHidden = false;
     const tvLabel = document.getElementById('tvToggleLabel');
     if(tvLabel) tvLabel.textContent = 'Ocultar controles';
@@ -5105,6 +5020,65 @@
       items.map(prog => tmdb(`/${prog.type}/${prog.id}?language=${LANG}`).then(item=>({item,prog})))
     );
     results.forEach(r=>{ if(r.status==='fulfilled') car.appendChild(buildContinueCard(r.value.item, r.value.prog)); });
+    // También renderizar Mi Lista
+    renderMyList();
+  }
+
+  async function renderMyList(){
+    const sec = document.getElementById('myListSection');
+    const car = document.getElementById('myListCarousel');
+    if(!sec||!car) return;
+    const list = JSON.parse(safeStorage.getItem('sx_mylist')||'[]');
+    if(!list.length){ sec.classList.remove('visible'); return; }
+    sec.classList.add('visible');
+    car.innerHTML = '';
+    // Cargar en paralelo — cada item puede ser movie o tv, intentamos ambos
+    const results = await Promise.allSettled(
+      list.map(async id => {
+        // Intentar primero como movie, luego como tv
+        try {
+          const item = await tmdb(`/movie/${id}?language=${LANG}`);
+          return { item, type: 'movie' };
+        } catch(e) {
+          const item = await tmdb(`/tv/${id}?language=${LANG}`);
+          return { item, type: 'tv' };
+        }
+      })
+    );
+    results.forEach(r => {
+      if(r.status !== 'fulfilled') return;
+      const { item, type } = r.value;
+      const div = document.createElement('div');
+      div.className = 'continue-card';
+      const title = item.title||item.name||'';
+      const poster = item.poster_path ? `${IMG}${IMG_SIZE}${item.poster_path}` : '';
+      div.innerHTML = `
+        ${poster ? `<img src="${poster}" alt="${escapeHtml(title)}" loading="lazy" decoding="async">` : `<div style="width:100%;height:100%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:.7rem;text-align:center;padding:8px;color:var(--text-dim)">${escapeHtml(title)}</div>`}
+        <button class="continue-card-remove" onclick="event.stopPropagation();removeMyListItem('${item.id}',this.closest('.continue-card'))" title="Quitar">✕</button>
+        <div class="continue-card-overlay">
+          <div class="continue-card-title">${escapeHtml(title)}</div>
+          <div class="continue-card-sub" style="color:var(--accent)">♥ Guardada</div>
+        </div>`;
+      div.onclick = () => showDetailPage(item.id, type);
+      car.appendChild(div);
+    });
+  }
+
+  function removeMyListItem(id, cardEl){
+    const list = JSON.parse(safeStorage.getItem('sx_mylist')||'[]');
+    const updated = list.filter(i => String(i) !== String(id));
+    safeStorage.setItem('sx_mylist', JSON.stringify(updated));
+    dpMyList = updated;
+    if(cardEl) cardEl.remove();
+    const car = document.getElementById('myListCarousel');
+    if(car && !car.children.length) document.getElementById('myListSection')?.classList.remove('visible');
+  }
+
+  function clearMyList(){
+    if(!confirm('¿Vaciar tu lista?')) return;
+    safeStorage.setItem('sx_mylist', '[]');
+    dpMyList = [];
+    document.getElementById('myListSection')?.classList.remove('visible');
   }
 
   function buildContinueCard(item, prog){
@@ -5135,87 +5109,6 @@
   }
 
   // ================================================================
-  // MI LISTA — carrusel de favoritos en el home
-  // ================================================================
-  async function renderMyList(){
-    const sec = document.getElementById('myListSection');
-    const car = document.getElementById('myListCarousel');
-    if(!sec || !car) return;
-
-    // dpMyList puede no estar cargado aún al inicio — leerlo fresh
-    const ids = JSON.parse(safeStorage.getItem('sx_mylist') || '[]');
-    if(!ids.length){ sec.classList.remove('visible'); return; }
-
-    sec.classList.add('visible');
-    car.innerHTML = '';
-
-    // Cargar metadata de TMDB para cada ID en paralelo
-    // Intentar primero como movie, si falla como tv
-    const results = await Promise.allSettled(
-      ids.map(async id => {
-        // Intentar movie primero, luego tv
-        try {
-          const item = await tmdb(`/movie/${id}?language=${LANG}`);
-          if(item && item.id) return { item, type: 'movie' };
-        } catch(e){}
-        const item = await tmdb(`/tv/${id}?language=${LANG}`);
-        return { item, type: 'tv' };
-      })
-    );
-
-    results.forEach((r, i) => {
-      if(r.status !== 'fulfilled') return;
-      const { item, type } = r.value;
-      if(!item || !item.id) return;
-      const id = ids[i];
-      car.appendChild(buildMyListCard(item, type, id));
-    });
-
-    if(!car.children.length) sec.classList.remove('visible');
-  }
-
-  function buildMyListCard(item, type, id){
-    const div = document.createElement('div');
-    div.className = 'continue-card';
-    const title = item.title || item.name || '';
-    const poster = item.poster_path ? `${IMG}${IMG_SIZE}${item.poster_path}` : '';
-    const year = (item.release_date || item.first_air_date || '').slice(0,4);
-    div.innerHTML = `
-      ${poster
-        ? `<img src="${poster}" alt="${escapeHtml(title)}" loading="lazy" decoding="async">`
-        : `<div style="width:100%;height:100%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:.7rem;text-align:center;padding:8px;color:var(--text-dim)">${escapeHtml(title)}</div>`
-      }
-      <button class="continue-card-remove" title="Quitar de Mi Lista"
-        onclick="event.stopPropagation();removeMyListItem('${id}',this.closest('.continue-card'))">✕</button>
-      <div class="continue-card-overlay">
-        <div class="continue-card-title">${escapeHtml(title)}</div>
-        <div class="continue-card-sub" style="color:var(--accent);font-weight:600">${type==='tv'?'Serie':'Película'}${year?' · '+year:''}</div>
-      </div>`;
-    div.onclick = () => showDetailPage(id, type);
-    return div;
-  }
-
-  function removeMyListItem(id, cardEl){
-    const sid = String(id);
-    dpMyList = dpMyList.filter(x => x !== sid);
-    safeStorage.setItem('sx_mylist', JSON.stringify(dpMyList));
-    if(cardEl) cardEl.remove();
-    const car = document.getElementById('myListCarousel');
-    if(car && !car.children.length) document.getElementById('myListSection')?.classList.remove('visible');
-    showToast('Eliminado de Mi Lista');
-  }
-
-  function clearMyList(){
-    if(!confirm('¿Vaciar Mi Lista?')) return;
-    dpMyList = [];
-    safeStorage.setItem('sx_mylist', JSON.stringify([]));
-    const car = document.getElementById('myListCarousel');
-    if(car) car.innerHTML = '';
-    document.getElementById('myListSection')?.classList.remove('visible');
-    showToast('Mi Lista vaciada');
-  }
-
-  // ================================================================
   // REPRODUCTOR — con progreso + auto-next ARREGLADO
   // ================================================================
 
@@ -5238,14 +5131,20 @@
                  totalSeasons:seasons||1,totalEpisodes:0,title,runtimeMin:0,url,source};
 
     document.getElementById('playerPage').classList.add('active');
-    document.getElementById('playerPage').classList.remove('controls-hidden');
+    // Arrancar con controles ocultos — aparecen al mover el mouse
+    const _isTV = document.documentElement.classList.contains('tv-mode');
+    if(!_isTV){
+      document.getElementById('playerPage').classList.add('controls-hidden');
+    } else {
+      document.getElementById('playerPage').classList.remove('controls-hidden');
+    }
     _tvControlsHidden = false;
     const tvLabel2=document.getElementById('tvToggleLabel');
     if(tvLabel2) tvLabel2.textContent='Ocultar controles';
     document.getElementById('playerTitle').textContent=title;
     document.getElementById('playerEpInfo').textContent='';
     document.body.style.overflow='hidden';
-    // Panel lateral: cerrar al abrir el player, ocultar botones (se muestran solo en series)
+    // Panel lateral: cerrar al abrir el player
     closeEpPanel();
     const _epToggle = document.getElementById('epPanelToggle');
     const _epPrev   = document.getElementById('epQuickPrev');
@@ -5253,13 +5152,10 @@
     if(_epToggle) _epToggle.classList.remove('visible');
     if(_epPrev)   _epPrev.classList.remove('visible');
     if(_epNext)   _epNext.classList.remove('visible');
-    // Limpiar listas del panel
     const _epList = document.getElementById('epSideList');
     const _epSeas = document.getElementById('epSideSeasons');
     if(_epList) _epList.innerHTML = '';
     if(_epSeas) _epSeas.innerHTML = '';
-    // Limpiar onblur al abrir (se setea en loadPlayerSource)
-    window.onblur = null;
     if(document.documentElement.classList.contains('tv-mode')){
       clearInterval(heroInterval); heroInterval=null;
     }
@@ -5313,21 +5209,15 @@
       playerState.type==='tv'?`T${playerState.season} · E${playerState.episode}`:'';
   }
 
-  // ================================================================
-  // PANEL LATERAL DE EPISODIOS — funciones
-  // ================================================================
   function renderEpisodeControls(bottom, totalSeasons, episodeCount){
-    // Mostrar botón toggle + botones prev/next flotantes
     const toggle = document.getElementById('epPanelToggle');
     const prev   = document.getElementById('epQuickPrev');
     const next   = document.getElementById('epQuickNext');
-    if(toggle){ toggle.classList.add('visible'); }
-    if(prev)  { prev.classList.add('visible'); }
-    if(next)  { next.classList.add('visible'); }
-    // Actualizar badge del botón
+    if(toggle) toggle.classList.add('visible');
+    if(prev)   prev.classList.add('visible');
+    if(next)   next.classList.add('visible');
     const badge = document.getElementById('epPanelBadge');
     if(badge) badge.textContent = `T${playerState.season}·E${playerState.episode}`;
-    // Renderizar el panel con la temporada actual
     _renderEpPanel(playerState.season, totalSeasons, episodeCount);
   }
 
@@ -5341,18 +5231,13 @@
   }
 
   async function _renderEpPanel(season, totalSeasons, knownEpCount){
-    const panel      = document.getElementById('epSidePanel');
-    const titleEl    = document.getElementById('epSidePanelTitle');
-    const subEl      = document.getElementById('epSidePanelSub');
-    const seasonsEl  = document.getElementById('epSideSeasons');
-    const listEl     = document.getElementById('epSideList');
-    if(!panel) return;
-
-    // Título
+    const titleEl   = document.getElementById('epSidePanelTitle');
+    const subEl     = document.getElementById('epSidePanelSub');
+    const seasonsEl = document.getElementById('epSideSeasons');
+    const listEl    = document.getElementById('epSideList');
+    if(!listEl) return;
     if(titleEl) titleEl.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><path d="M8 21h8m-4-4v4"/></svg> ${escapeHtml(playerState.title||'Serie')}`;
     if(subEl) subEl.textContent = `${totalSeasons} temporada${totalSeasons!==1?'s':''}`;
-
-    // Tabs de temporadas
     if(seasonsEl){
       seasonsEl.innerHTML = '';
       for(let s=1; s<=totalSeasons; s++){
@@ -5364,8 +5249,6 @@
         seasonsEl.appendChild(btn);
       }
     }
-
-    // Lista de episodios
     await _loadEpPanelSeason(season, totalSeasons);
   }
 
@@ -5373,15 +5256,11 @@
     const seasonsEl = document.getElementById('epSideSeasons');
     const listEl    = document.getElementById('epSideList');
     if(!listEl) return;
-
-    // Actualizar tab activo
     if(seasonsEl){
       seasonsEl.querySelectorAll('.ep-season-btn').forEach((b,i)=>{
         b.classList.toggle('active', i+1===season);
       });
     }
-
-    // Skeleton
     listEl.innerHTML = Array(5).fill(`
       <div style="display:flex;gap:10px;padding:8px;margin-bottom:4px">
         <div class="dp-skel" style="width:96px;height:54px;border-radius:6px;flex-shrink:0"></div>
@@ -5391,18 +5270,16 @@
           <div class="dp-skel" style="height:8px;width:65%"></div>
         </div>
       </div>`).join('');
-
     try{
       const sd = await tmdb(`/tv/${playerState.id}/season/${season}?language=${LANG}`);
       const eps = sd.episodes || [];
       playerState.totalEpisodes = eps.length || 20;
-
       listEl.innerHTML = eps.map(ep=>{
         const thumb = ep.still_path ? `${IMG}w300${ep.still_path}` : '';
         const name  = ep.name || `Episodio ${ep.episode_number}`;
         const isActive = (season===playerState.season && ep.episode_number===playerState.episode);
         return `<div class="ep-side-item${isActive?' active':''}"
-                     onclick="epPanelSelectEp(${season},${ep.episode_number},${playerState.totalSeasons})">
+                     onclick="epPanelSelectEp(${season},${ep.episode_number},${totalSeasons})">
           <div class="ep-side-thumb">
             ${thumb ? `<img src="${thumb}" alt="${escapeHtml(name)}" loading="lazy">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:1.2rem">▶</div>`}
             <div class="ep-side-dot"></div>
@@ -5415,38 +5292,29 @@
           </div>
         </div>`;
       }).join('');
-
-      // Scroll al episodio activo
       const activeItem = listEl.querySelector('.ep-side-item.active');
       if(activeItem) setTimeout(()=>activeItem.scrollIntoView({block:'center',behavior:'smooth'}), 100);
-
     }catch(e){
       listEl.innerHTML = '<p style="color:var(--text-muted);font-size:.84rem;padding:12px">No se pudo cargar la temporada.</p>';
     }
   }
 
   function epPanelSelectEp(season, episode, totalSeasons){
-    const prevSeason = playerState.season;
     playerState.season  = season;
     playerState.episode = episode;
     cancelAutoNext();
     fetchEpisodeRuntime(playerState.id, season, episode);
     updateEpInfo();
     loadPlayerSource();
-    // Actualizar badge
     const badge = document.getElementById('epPanelBadge');
     if(badge) badge.textContent = `T${season}·E${episode}`;
-    // Actualizar items activos en el panel
     document.querySelectorAll('.ep-side-item').forEach(el => el.classList.remove('active'));
-    // Si el panel tiene la temporada correcta, marcar el activo
     const seasonsEl = document.getElementById('epSideSeasons');
     if(seasonsEl){
       const activeBtn = seasonsEl.querySelectorAll('.ep-season-btn')[season-1];
       if(activeBtn && !activeBtn.classList.contains('active')){
-        // Cambió de temporada: recargar lista
         _loadEpPanelSeason(season, totalSeasons);
       } else {
-        // Misma temporada: solo marcar activo
         const list = document.getElementById('epSideList');
         if(list){
           const items = list.querySelectorAll('.ep-side-item');
@@ -5454,14 +5322,7 @@
         }
       }
     }
-    // Cerrar panel en mobile
     if(window.innerWidth <= 600) closeEpPanel();
-    // Si es anime: recargar servidores
-    if(_dpIsAnime){
-      currentAnime1ServersCache=null;
-      _renderAnimeSourceSelector(null);
-      _fetchAnimeServersForEpisode(season, episode);
-    }
   }
 
   async function changeSeason(s){
@@ -5469,17 +5330,35 @@
     const sd=await tmdb(`/tv/${playerState.id}/season/${s}?language=${LANG}`).catch(()=>({episodes:[]}));
     const epCount=sd.episodes?sd.episodes.length:20;
     playerState.totalEpisodes=epCount;
+    const epSel=document.getElementById('episodeSelect');
+    if(epSel){
+      epSel.innerHTML='';
+      for(let e=1;e<=epCount;e++)
+        epSel.innerHTML+=`<option value="${e}" ${e===1?'selected':''}>Episodio ${e}</option>`;
+    }
     fetchEpisodeRuntime(playerState.id,playerState.season,1);
     updateEpInfo();
     loadPlayerSource();
-    if(_dpIsAnime){currentAnime1ServersCache=null;_renderAnimeSourceSelector(null);_fetchAnimeServersForEpisode(playerState.season,1);}
+    // Si es anime: recargar servidores API para el nuevo episodio
+    if(_dpIsAnime){
+      currentAnime1ServersCache=null;
+      _renderAnimeSourceSelector(null);
+      _fetchAnimeServersForEpisode(playerState.season, 1);
+    }
   }
 
   function changeEpisode(e){
-    playerState.episode=parseInt(e);cancelAutoNext();
+    playerState.episode=parseInt(e);
+    cancelAutoNext();
     fetchEpisodeRuntime(playerState.id,playerState.season,playerState.episode);
-    updateEpInfo();loadPlayerSource();
-    if(_dpIsAnime){currentAnime1ServersCache=null;_renderAnimeSourceSelector(null);_fetchAnimeServersForEpisode(playerState.season,playerState.episode);}
+    updateEpInfo();
+    loadPlayerSource();
+    // Si es anime: recargar servidores API para el nuevo episodio
+    if(_dpIsAnime){
+      currentAnime1ServersCache=null;
+      _renderAnimeSourceSelector(null);
+      _fetchAnimeServersForEpisode(playerState.season, playerState.episode);
+    }
   }
 
   function startProgressTracking(){
@@ -5564,23 +5443,8 @@
     // Sin delay — la preconexión ya fue hecha en openModal
     const initDelay = isTV ? 30 : 0;
 
-    // 🛡️ ANTI-ANUNCIOS capa 1: window.open ya bloqueado en <head>
-    // capa 2: recuperar foco si algo logra escapar
-    window.onblur = function() {
-      setTimeout(() => window.focus(), 10);
-    };
-    // capa 3: clickShield — absorbe el primer clic sobre el iframe
-    // Vimeus abre el ad en el primer clic del usuario; el shield lo intercepta
-    const _shield = document.getElementById('playerClickOverlay');
-    if (_shield) {
-      _shield.classList.add('ad-shield');
-      const _removeShield = function(e) {
-        e.stopPropagation();
-        _shield.classList.remove('ad-shield');
-        _shield.removeEventListener('click', _removeShield);
-      };
-      _shield.addEventListener('click', _removeShield);
-    }
+    // 🛡️ ANTI-ANUNCIOS: solo window.open bloqueado en <head>
+    // clickShield y window.onblur removidos — interfieren con Vimeus en TV/Chromecast
 
     setTimeout(()=>{
       if(url && (url.endsWith('.m3u8') || url.includes('.m3u8'))) {
@@ -5616,8 +5480,9 @@
         frame.style.display = 'block';
         frame.src = url;
 
-        // Fallback generoso — dar tiempo al player Vimeus para inicializar
-        const fallbackMs = isTV ? 12000 : 8000;
+        // Fallback generoso — Vimeus puede tardar hasta 15s en preparar el stream
+        // Si pasado ese tiempo onload no disparó, asumimos que está reproduciéndose
+        const fallbackMs = isTV ? 22000 : 16000;
         setTimeout(()=>{
           _clearMsgTimers();
           if(!onloadFired){
@@ -5947,9 +5812,7 @@
     }
     clearInterval(progressInterval);
     document.getElementById('playerPage').classList.remove('active');
-    // Limpiar anti-anuncio al cerrar
-    window.onblur = null;
-    // Ocultar panel lateral
+    // Ocultar botones del panel lateral
     closeEpPanel();
     const _ct = document.getElementById('epPanelToggle');
     const _cp = document.getElementById('epQuickPrev');
@@ -6189,17 +6052,134 @@
     safeStorage.setItem('sx_mylist',JSON.stringify(dpMyList));
     const btn=document.getElementById('dpListBtn');
     if(btn){const inList=dpMyList.includes(sid);btn.textContent=inList?'✓ En Mi Lista':'+ Mi Lista';btn.classList.toggle('added',inList);}
-    // Refrescar carrusel en el home
-    renderMyList();
+    // Refrescar sección Mi Lista en home
+    setTimeout(renderMyList, 200);
   }
 
   function dpOpenTM(key){document.getElementById('dpTrailerFrame').src=`https://www.youtube.com/embed/${key}?autoplay=1`;document.getElementById('dpTrailerModal').classList.add('open');}
   function dpCloseTM(){document.getElementById('dpTrailerModal').classList.remove('open');document.getElementById('dpTrailerFrame').src='';}
 
 
+  // ================================================================
+  // 🛡️ KILL ADS — bloqueo activo de elementos publicitarios
+  // Complementa el MainActivity.kt shouldInterceptRequest
+  // ================================================================
+  (function setupKillAds() {
+    const AD_SELECTORS = [
+      'iframe[src*="doubleclick"]','iframe[src*="googlesyndication"]',
+      'iframe[src*="adnxs"]','iframe[src*="exoclick"]','iframe[src*="adsterra"]',
+      'iframe[src*="popads"]','iframe[src*="popcash"]','iframe[src*="trafficjunky"]',
+      'iframe[src*="imasdk"]','iframe[src*="adskeeper"]','iframe[src*="histats"]',
+      'iframe[src*="cloudflareinsights"]','iframe[src*="hotjar"]',
+      'script[src*="doubleclick"]','script[src*="googlesyndication"]',
+      'script[src*="googletagmanager"]','script[src*="hotjar"]',
+      'script[src*="imasdk"]','script[src*="histats"]',
+    ];
+    const AD_URL_FRAGMENTS = [
+      'doubleclick','googlesyndication','adnxs','exoclick','adsterra',
+      'popads','popcash','trafficjunky','imasdk.googleapis','adskeeper',
+      'histats','cloudflareinsights','hotjar','fullstory','logrocket',
+      'segment.com','mixpanel','amplitude.com','heap.io',
+      'googletagmanager','googletagservices'
+    ];
+
+    function killAds() {
+      // Eliminar elementos conocidos de ads por selector
+      AD_SELECTORS.forEach(sel => {
+        document.querySelectorAll(sel).forEach(el => {
+          if(!el.closest('#playerFrame') && !el.id?.includes('player')) el.remove();
+        });
+      });
+      // Eliminar iframes de ads por URL
+      document.querySelectorAll('iframe').forEach(el => {
+        const src = (el.src || '').toLowerCase();
+        if(el.id === 'playerFrame') return; // nunca tocar el iframe del player
+        if(AD_URL_FRAGMENTS.some(f => src.includes(f))) { el.remove(); }
+      });
+      // Eliminar scripts de tracking
+      document.querySelectorAll('script[src]').forEach(el => {
+        const src = (el.src || '').toLowerCase();
+        if(AD_URL_FRAGMENTS.some(f => src.includes(f))) { el.remove(); }
+      });
+      // Bloquear skip de ads si aparece alguno
+      const skip = document.querySelector('.skip-ad,.ytp-ad-skip-button,.ad-skip,.btn-skip,[class*="skip-ad"],[id*="skip-ad"]');
+      if(skip) skip.click();
+    }
+
+    killAds();
+    // Observer para elementos inyectados dinámicamente
+    const obs = new MutationObserver(function(mutations) {
+      let hasNew = false;
+      mutations.forEach(m => { if(m.addedNodes.length) hasNew = true; });
+      if(hasNew) killAds();
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+  })();
+
   // START
   init();
 </script>
+<div id="contenedor-iframe-pequeno" style="display: none;">
+  <iframe id="iframe-pequeno" src="" style="width: 320px; height: 250px; border: none;" title="Mi sitio en Blogger"></iframe>
+</div>
 
+<script>
+  // 1. TU LISTA DE PÁGINAS A ROTAR
+  const listaSitios = [
+    "https://luapelis.blogspot.com/2026/05/luapelis.html"
+    // Puedes agregar una coma arriba y poner más enlaces aquí si quieres rotarlos
+  ];
+
+  // 2. TIEMPO DE ESPERA POR PÁGINA (24 horas en milisegundos)
+  // (Si quieres hacer pruebas rápido, cámbialo a 10000 para que sean 10 segundos)
+  const TIEMPO_ESPERA = 24 * 60 * 60 * 1000;
+
+  // 3. LÓGICA DEL ROTADOR PARA EL CUADRO PEQUEÑO
+  (function(){
+    const ahora = Date.now();
+
+    // Usamos un nombre diferente en el storage ("historialIframePequeno")
+    // para que no haga conflicto con tus pruebas anteriores del full-screen
+    let historial = JSON.parse(localStorage.getItem("historialIframePequeno")) || {};
+    let urlParaMostrar = null;
+
+    // Revisamos la lista de páginas
+    for (let i = 0; i < listaSitios.length; i++) {
+      let url = listaSitios[i];
+      let ultimaVezVista = historial[url];
+
+      // Si NUNCA ha visto esta página, o ya pasaron las 24 horas
+      if (!ultimaVezVista || (ahora - ultimaVezVista) > TIEMPO_ESPERA) {
+        urlParaMostrar = url;
+        break;
+      }
+    }
+
+    const contenedorAnuncio = document.getElementById("contenedor-iframe-pequeno");
+
+    if (urlParaMostrar) {
+      // Si hay una página disponible, le ponemos la URL al iframe y lo hacemos visible
+      document.getElementById("iframe-pequeno").src = urlParaMostrar;
+      contenedorAnuncio.style.display = "block";
+
+      // Guardamos que el usuario acaba de ver esta URL
+      historial[urlParaMostrar] = ahora;
+      localStorage.setItem("historialIframePequeno", JSON.stringify(historial));
+
+    } else {
+      // Si ya vio todo, el div se queda en "display: none" y desaparece de tu página web sin dejar espacios en blanco
+      contenedorAnuncio.style.display = "none";
+    }
+  })();
+</script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-LD9PCRCG1H"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-LD9PCRCG1H');
+</script>
 </body>
 </html>
