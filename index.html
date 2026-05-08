@@ -6181,5 +6181,167 @@
 
   gtag('config', 'G-LD9PCRCG1H');
 </script>
+  <script>
+// ══════════════════════════════════════════════════════════
+// NAVEGACIÓN D-PAD — Samsung TV (Tizen)
+// Solo activo en tv-mode
+// ══════════════════════════════════════════════════════════
+(function() {
+  if (!document.documentElement.classList.contains('tv-mode')) return;
+
+  // Registrar teclas del control remoto
+  if (typeof tizen !== 'undefined') {
+    ['MediaPlay','MediaPause','MediaStop','MediaPlayPause',
+     'MediaFastForward','MediaRewind',
+     'ColorF0Red','ColorF1Green','ColorF2Yellow','ColorF3Blue'
+    ].forEach(function(k){ try{ tizen.tvinputdevice.registerKey(k); }catch(e){} });
+  }
+
+  // Estilo de foco
+  var style = document.createElement('style');
+  style.textContent = `
+    .tv-focused {
+      outline: 3px solid #e8b94a !important;
+      outline-offset: 2px !important;
+      box-shadow: 0 0 0 3px rgba(232,185,74,0.3) !important;
+      z-index: 20 !important;
+      position: relative !important;
+    }
+  `;
+  document.head.appendChild(style);
+
+  var focused = null;
+
+  // Elementos focuseables
+  function getFocusables() {
+    return Array.from(document.querySelectorAll(
+      '.card, .continue-card, .dp-rec-card, .top-card-img, ' +
+      '.channel-card-compact, .dp-ep-card, .dp-tr-card, ' +
+      '.tv-nav-item, .genre-pill, .cat-pill, .tab, .filter-btn, ' +
+      '.btn-play, .btn-info, .dp-play-btn, .dp-sec-btn, ' +
+      '.hero-dot-btn, .carousel-arrow, .see-all-btn, ' +
+      '.source-btn, .player-back, .ep-nav-btn, ' +
+      '.ep-side-item, .ep-season-btn, ' +
+      '.schedule-ch-badge, .autonext-play, .autonext-cancel, ' +
+      '#btnFullscreen, .tv-toggle-controls'
+    )).filter(function(el) {
+      var r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 &&
+             !el.closest('.modal-overlay:not(.open)') &&
+             !el.closest('.anime-modal-overlay:not(.open)');
+    });
+  }
+
+  function setFocus(el) {
+    if (focused) focused.classList.remove('tv-focused');
+    focused = el;
+    if (!focused) return;
+    focused.classList.add('tv-focused');
+    focused.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  }
+
+  function getRect(el) { return el.getBoundingClientRect(); }
+
+  function findNearest(dir) {
+    var els = getFocusables();
+    if (!els.length) return;
+    if (!focused || !document.contains(focused)) {
+      setFocus(els[0]);
+      return;
+    }
+    var cr = getRect(focused);
+    var cx = cr.left + cr.width / 2;
+    var cy = cr.top + cr.height / 2;
+    var best = null, bestScore = Infinity;
+
+    els.forEach(function(el) {
+      if (el === focused) return;
+      var r = getRect(el);
+      var ex = r.left + r.width / 2;
+      var ey = r.top + r.height / 2;
+      var dx = ex - cx, dy = ey - cy;
+      var valid = false;
+      var primary, secondary;
+
+      if (dir === 'right') { valid = dx > 5;  primary = dx; secondary = Math.abs(dy); }
+      if (dir === 'left')  { valid = dx < -5; primary = -dx; secondary = Math.abs(dy); }
+      if (dir === 'down')  { valid = dy > 5;  primary = dy; secondary = Math.abs(dx); }
+      if (dir === 'up')    { valid = dy < -5; primary = -dy; secondary = Math.abs(dx); }
+
+      if (!valid) return;
+      // Score: prioriza dirección principal, penaliza desviación lateral
+      var score = primary + secondary * 2;
+      if (score < bestScore) { bestScore = score; best = el; }
+    });
+
+    if (best) setFocus(best);
+  }
+
+  // Inicializar foco en el primer elemento del sidebar
+  setTimeout(function() {
+    var els = getFocusables();
+    if (els.length) setFocus(els[0]);
+  }, 1000);
+
+  // Actualizar foco cuando cambia la página
+  var _origShowHome = window.showHome;
+  window.showHome = function() {
+    _origShowHome.apply(this, arguments);
+    setTimeout(function() {
+      var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
+      if (el) setFocus(el);
+    }, 300);
+  };
+
+  document.addEventListener('keydown', function(e) {
+    // No interceptar si hay un input activo
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+
+    switch(e.keyCode) {
+      case 37: e.preventDefault(); findNearest('left');  break; // ←
+      case 38: e.preventDefault(); findNearest('up');    break; // ↑
+      case 39: e.preventDefault(); findNearest('right'); break; // →
+      case 40: e.preventDefault(); findNearest('down');  break; // ↓
+
+      case 13: // Enter / OK
+        e.preventDefault();
+        if (focused) {
+          focused.click();
+          // Actualizar foco después del click
+          setTimeout(function() {
+            if (!document.contains(focused)) {
+              var el = getFocusables()[0];
+              if (el) setFocus(el);
+            }
+          }, 400);
+        }
+        break;
+
+      case 10009: // Botón BACK
+        e.preventDefault();
+        var player = document.getElementById('playerPage');
+        var detail = document.getElementById('detailPage');
+        var modal  = document.getElementById('modalOverlay');
+        if (modal && modal.classList.contains('open')) { closeModalBtn(); }
+        else if (player && player.classList.contains('active')) { closePlayer(); }
+        else if (detail && detail.classList.contains('active')) {
+          dpHideDetail(); showHome();
+        } else { showHome(); }
+        setTimeout(function() {
+          var el = getFocusables()[0];
+          if (el) setFocus(el);
+        }, 400);
+        break;
+    }
+  });
+
+  // Quitar foco al hacer click con mouse
+  document.addEventListener('mousedown', function() {
+    if (focused) focused.classList.remove('tv-focused');
+    focused = null;
+  });
+
+})();
+</script>
 </body>
 </html>
