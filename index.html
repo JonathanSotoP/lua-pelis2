@@ -6183,8 +6183,7 @@
 </script>
   <script>
 // ══════════════════════════════════════════════════════════
-// NAVEGACIÓN D-PAD — Samsung TV (Tizen)
-// Solo activo en tv-mode
+// NAVEGACIÓN D-PAD — Samsung TV (Tizen) v2
 // ══════════════════════════════════════════════════════════
 (function() {
   if (!document.documentElement.classList.contains('tv-mode')) return;
@@ -6193,11 +6192,12 @@
   if (typeof tizen !== 'undefined') {
     ['MediaPlay','MediaPause','MediaStop','MediaPlayPause',
      'MediaFastForward','MediaRewind',
-     'ColorF0Red','ColorF1Green','ColorF2Yellow','ColorF3Blue'
+     'ColorF0Red','ColorF1Green','ColorF2Yellow','ColorF3Blue',
+     'ChannelUp','ChannelDown'
     ].forEach(function(k){ try{ tizen.tvinputdevice.registerKey(k); }catch(e){} });
   }
 
-  // Estilo de foco
+  // Estilos
   var style = document.createElement('style');
   style.textContent = `
     .tv-focused {
@@ -6207,12 +6207,126 @@
       z-index: 20 !important;
       position: relative !important;
     }
+
+    /* Cursor virtual */
+    #tv-cursor {
+      position: fixed;
+      width: 24px;
+      height: 24px;
+      background: rgba(232,185,74,0.85);
+      border: 2px solid #fff;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 99999;
+      transform: translate(-50%, -50%);
+      display: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      transition: background 0.15s;
+    }
+    #tv-cursor.active { display: block; }
+    #tv-cursor.clicking { background: rgba(255,255,255,0.9); transform: translate(-50%,-50%) scale(0.8); }
+
+    /* Toast de modo */
+    #tv-mode-toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(14,14,14,0.95);
+      border: 1px solid #e8b94a;
+      color: #e8b94a;
+      padding: 10px 22px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      z-index: 99998;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    #tv-mode-toast.show { opacity: 1; }
   `;
   document.head.appendChild(style);
 
-  var focused = null;
+  // Crear cursor virtual
+  var cursor = document.createElement('div');
+  cursor.id = 'tv-cursor';
+  document.body.appendChild(cursor);
 
-  // Elementos focuseables
+  // Crear toast
+  var modeToast = document.createElement('div');
+  modeToast.id = 'tv-mode-toast';
+  document.body.appendChild(modeToast);
+
+  // Estado
+  var focused = null;
+  var cursorMode = false;
+  var cursorX = window.innerWidth / 2;
+  var cursorY = window.innerHeight / 2;
+  var cursorSpeed = 18;
+  var toastTimer = null;
+
+  function showModeToast(msg) {
+    modeToast.textContent = msg;
+    modeToast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() { modeToast.classList.remove('show'); }, 2000);
+  }
+
+  // ── MODO CURSOR ────────────────────────────────────────
+  function enableCursorMode() {
+    cursorMode = true;
+    cursorX = window.innerWidth / 2;
+    cursorY = window.innerHeight / 2;
+    cursor.style.left = cursorX + 'px';
+    cursor.style.top  = cursorY + 'px';
+    cursor.classList.add('active');
+    if (focused) { focused.classList.remove('tv-focused'); focused = null; }
+    showModeToast('🖱 Modo puntero activado');
+    // Actualizar label del botón del sidebar si existe
+    var label = document.getElementById('tvNavPunteroLabel');
+    if (label) label.textContent = '🖱 Desactivar Puntero';
+  }
+
+  function disableCursorMode() {
+    cursorMode = false;
+    cursor.classList.remove('active');
+    showModeToast('🎮 Modo D-pad activado');
+    var label = document.getElementById('tvNavPunteroLabel');
+    if (label) label.textContent = '🖱 Habilitar Puntero';
+    // Inicializar foco en el primer elemento visible
+    setTimeout(function() {
+      var els = getFocusables();
+      if (els.length) setFocus(els[0]);
+    }, 100);
+  }
+
+  // Exponer para el botón del sidebar
+  window.__toggleCursorMode = function() {
+    if (cursorMode) disableCursorMode();
+    else enableCursorMode();
+  };
+
+  function moveCursor(dx, dy) {
+    cursorX = Math.max(0, Math.min(window.innerWidth,  cursorX + dx));
+    cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + dy));
+    cursor.style.left = cursorX + 'px';
+    cursor.style.top  = cursorY + 'px';
+  }
+
+  function clickAtCursor() {
+    cursor.classList.add('clicking');
+    setTimeout(function() { cursor.classList.remove('clicking'); }, 150);
+    var el = document.elementFromPoint(cursorX, cursorY);
+    if (el) {
+      el.click();
+      // Buscar el ancestro clickeable más cercano
+      var clickable = el.closest('.card,.continue-card,.dp-rec-card,.channel-card-compact,.dp-ep-card,.tv-nav-item,.btn-play,.dp-play-btn,.dp-sec-btn,.genre-pill,.tab,.source-btn,.carousel-arrow,.hero-dot-btn,.ep-side-item,.schedule-ch-badge,.autonext-play,.autonext-cancel,button,a,[onclick]');
+      if (clickable) clickable.click();
+    }
+  }
+
+  // ── MODO D-PAD ─────────────────────────────────────────
   function getFocusables() {
     return Array.from(document.querySelectorAll(
       '.card, .continue-card, .dp-rec-card, .top-card-img, ' +
@@ -6223,12 +6337,10 @@
       '.source-btn, .player-back, .ep-nav-btn, ' +
       '.ep-side-item, .ep-season-btn, ' +
       '.schedule-ch-badge, .autonext-play, .autonext-cancel, ' +
-      '#btnFullscreen, .tv-toggle-controls'
+      '#btnFullscreen, .tv-toggle-controls, .tv-search-bar-close'
     )).filter(function(el) {
       var r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0 &&
-             !el.closest('.modal-overlay:not(.open)') &&
-             !el.closest('.anime-modal-overlay:not(.open)');
+      return r.width > 0 && r.height > 0;
     });
   }
 
@@ -6240,8 +6352,6 @@
     focused.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }
 
-  function getRect(el) { return el.getBoundingClientRect(); }
-
   function findNearest(dir) {
     var els = getFocusables();
     if (!els.length) return;
@@ -6249,27 +6359,24 @@
       setFocus(els[0]);
       return;
     }
-    var cr = getRect(focused);
+    var cr = focused.getBoundingClientRect();
     var cx = cr.left + cr.width / 2;
     var cy = cr.top + cr.height / 2;
     var best = null, bestScore = Infinity;
 
     els.forEach(function(el) {
       if (el === focused) return;
-      var r = getRect(el);
+      var r = el.getBoundingClientRect();
       var ex = r.left + r.width / 2;
       var ey = r.top + r.height / 2;
       var dx = ex - cx, dy = ey - cy;
       var valid = false;
       var primary, secondary;
-
-      if (dir === 'right') { valid = dx > 5;  primary = dx; secondary = Math.abs(dy); }
+      if (dir === 'right') { valid = dx > 5;  primary = dx;  secondary = Math.abs(dy); }
       if (dir === 'left')  { valid = dx < -5; primary = -dx; secondary = Math.abs(dy); }
-      if (dir === 'down')  { valid = dy > 5;  primary = dy; secondary = Math.abs(dx); }
+      if (dir === 'down')  { valid = dy > 5;  primary = dy;  secondary = Math.abs(dx); }
       if (dir === 'up')    { valid = dy < -5; primary = -dy; secondary = Math.abs(dx); }
-
       if (!valid) return;
-      // Score: prioriza dirección principal, penaliza desviación lateral
       var score = primary + secondary * 2;
       if (score < bestScore) { bestScore = score; best = el; }
     });
@@ -6277,69 +6384,174 @@
     if (best) setFocus(best);
   }
 
-  // Inicializar foco en el primer elemento del sidebar
-  setTimeout(function() {
-    var els = getFocusables();
-    if (els.length) setFocus(els[0]);
-  }, 1000);
+  // ── TECLAS ──────────────────────────────────────────────
+  // Mantener tecla presionada para cursor
+  var heldKeys = {};
+  var cursorMoveInterval = null;
 
-  // Actualizar foco cuando cambia la página
-  var _origShowHome = window.showHome;
-  window.showHome = function() {
-    _origShowHome.apply(this, arguments);
-    setTimeout(function() {
-      var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
-      if (el) setFocus(el);
-    }, 300);
-  };
+  function startCursorMove() {
+    if (cursorMoveInterval) return;
+    cursorMoveInterval = setInterval(function() {
+      var dx = 0, dy = 0;
+      if (heldKeys[37]) dx -= cursorSpeed;
+      if (heldKeys[39]) dx += cursorSpeed;
+      if (heldKeys[38]) dy -= cursorSpeed;
+      if (heldKeys[40]) dy += cursorSpeed;
+      if (dx || dy) moveCursor(dx, dy);
+    }, 16);
+  }
+
+  function stopCursorMove() {
+    if (!heldKeys[37] && !heldKeys[38] && !heldKeys[39] && !heldKeys[40]) {
+      clearInterval(cursorMoveInterval);
+      cursorMoveInterval = null;
+    }
+  }
 
   document.addEventListener('keydown', function(e) {
-    // No interceptar si hay un input activo
-    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    // No interceptar si hay un input activo (excepto para BACK y ChannelUp/Down)
+    var inputActive = document.activeElement &&
+      (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
 
+    // ChannelUp (activa cursor) / ChannelDown (desactiva cursor)
+    // Samsung: ChannelUp=427, ChannelDown=428
+    if (e.keyCode === 427) { // ChannelUp = flecha arriba del volumen
+      e.preventDefault();
+      enableCursorMode();
+      return;
+    }
+    if (e.keyCode === 428) { // ChannelDown = flecha abajo del volumen
+      e.preventDefault();
+      disableCursorMode();
+      return;
+    }
+
+    // BACK siempre funciona
+    if (e.keyCode === 10009) {
+      e.preventDefault();
+      // Si barra de búsqueda TV está abierta → cerrarla y volver al foco
+      var tvBar = document.getElementById('tvSearchBar');
+      if (tvBar && tvBar.classList.contains('open')) {
+        if (window.closeTvSearchBar) closeTvSearchBar();
+        setTimeout(function() {
+          var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
+          if (el) setFocus(el);
+        }, 300);
+        return;
+      }
+      var player = document.getElementById('playerPage');
+      var detail = document.getElementById('detailPage');
+      var modal  = document.getElementById('modalOverlay');
+      if (modal && modal.classList.contains('open')) {
+        closeModalBtn();
+      } else if (player && player.classList.contains('active')) {
+        // FIX: Cerrar player y volver al home correctamente
+        closePlayer();
+        setTimeout(function() {
+          showHome();
+          var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
+          if (el) setFocus(el);
+        }, 300);
+      } else if (detail && detail.classList.contains('active')) {
+        dpHideDetail();
+        showHome();
+        setTimeout(function() {
+          var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
+          if (el) setFocus(el);
+        }, 300);
+      } else {
+        showHome();
+        setTimeout(function() {
+          var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
+          if (el) setFocus(el);
+        }, 300);
+      }
+      return;
+    }
+
+    if (inputActive) return;
+
+    // MODO CURSOR
+    if (cursorMode) {
+      heldKeys[e.keyCode] = true;
+      if ([37,38,39,40].indexOf(e.keyCode) !== -1) {
+        e.preventDefault();
+        startCursorMove();
+      }
+      if (e.keyCode === 13) {
+        e.preventDefault();
+        clickAtCursor();
+      }
+      return;
+    }
+
+    // MODO D-PAD
     switch(e.keyCode) {
-      case 37: e.preventDefault(); findNearest('left');  break; // ←
-      case 38: e.preventDefault(); findNearest('up');    break; // ↑
-      case 39: e.preventDefault(); findNearest('right'); break; // →
-      case 40: e.preventDefault(); findNearest('down');  break; // ↓
-
-      case 13: // Enter / OK
+      case 37: e.preventDefault(); findNearest('left');  break;
+      case 38: e.preventDefault(); findNearest('up');    break;
+      case 39: e.preventDefault(); findNearest('right'); break;
+      case 40: e.preventDefault(); findNearest('down');  break;
+      case 13:
         e.preventDefault();
         if (focused) {
           focused.click();
-          // Actualizar foco después del click
           setTimeout(function() {
-            if (!document.contains(focused)) {
+            // FIX búsqueda: después de click en resultado, mover foco a la página de resultados
+            var searchPage = document.getElementById('searchPage');
+            if (searchPage && searchPage.style.display !== 'none') {
+              // Si la barra de búsqueda se cerró, mover foco al primer resultado
+              var tvBar = document.getElementById('tvSearchBar');
+              if (!tvBar || !tvBar.classList.contains('open')) {
+                var firstCard = searchPage.querySelector('.card, .channel-card-compact');
+                if (firstCard) setFocus(firstCard);
+                return;
+              }
+            }
+            if (!document.contains(focused) || !focused.getBoundingClientRect().width) {
               var el = getFocusables()[0];
               if (el) setFocus(el);
             }
           }, 400);
         }
         break;
-
-      case 10009: // Botón BACK
-        e.preventDefault();
-        var player = document.getElementById('playerPage');
-        var detail = document.getElementById('detailPage');
-        var modal  = document.getElementById('modalOverlay');
-        if (modal && modal.classList.contains('open')) { closeModalBtn(); }
-        else if (player && player.classList.contains('active')) { closePlayer(); }
-        else if (detail && detail.classList.contains('active')) {
-          dpHideDetail(); showHome();
-        } else { showHome(); }
-        setTimeout(function() {
-          var el = getFocusables()[0];
-          if (el) setFocus(el);
-        }, 400);
-        break;
     }
   });
 
-  // Quitar foco al hacer click con mouse
+  document.addEventListener('keyup', function(e) {
+    if (cursorMode) {
+      delete heldKeys[e.keyCode];
+      stopCursorMove();
+    }
+  });
+
+  // FIX búsqueda: cuando se cierra la barra TV, mover foco a los resultados
+  var _origCloseTvSearchBar = window.closeTvSearchBar;
+  if (_origCloseTvSearchBar) {
+    window.closeTvSearchBar = function() {
+      _origCloseTvSearchBar.apply(this, arguments);
+      setTimeout(function() {
+        var searchPage = document.getElementById('searchPage');
+        if (searchPage && searchPage.style.display !== 'none') {
+          var firstCard = searchPage.querySelector('.card, .channel-card-compact');
+          if (firstCard) { setFocus(firstCard); return; }
+        }
+        var el = getFocusables()[0];
+        if (el) setFocus(el);
+      }, 300);
+    };
+  }
+
+  // Quitar foco al usar mouse
   document.addEventListener('mousedown', function() {
     if (focused) focused.classList.remove('tv-focused');
     focused = null;
   });
+
+  // Inicializar foco
+  setTimeout(function() {
+    var el = document.querySelector('.tv-nav-item') || getFocusables()[0];
+    if (el) setFocus(el);
+  }, 1200);
 
 })();
 </script>
