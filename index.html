@@ -6556,18 +6556,38 @@
 })();
 </script>
 
-  <script>
-// DETECTOR DE KEYCODES — remover después de identificar
+<script>
 (function(){
   if (!document.documentElement.classList.contains('tv-mode')) return;
+  
+  // Intentar registrar todas las teclas posibles
+  if (typeof tizen !== 'undefined') {
+    var allKeys = [
+      'VolumeUp','VolumeDown','VolumeMute',
+      'ChannelUp','ChannelDown',
+      'MediaPlay','MediaPause','MediaStop','MediaPlayPause',
+      'MediaFastForward','MediaRewind',
+      'ColorF0Red','ColorF1Green','ColorF2Yellow','ColorF3Blue',
+      'Menu','Tools','Info','Exit','Home',
+      'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'
+    ];
+    allKeys.forEach(function(k){
+      try{ tizen.tvinputdevice.registerKey(k); console.log('Registered: '+k); }
+      catch(e){ console.log('Failed: '+k); }
+    });
+  }
+
   var div = document.createElement('div');
-  div.style.cssText = 'position:fixed;top:10px;right:10px;z-index:999999;background:rgba(0,0,0,0.9);color:#e8b94a;padding:16px 20px;border-radius:8px;font-size:1.1rem;font-family:monospace;border:1px solid #e8b94a;min-width:200px';
-  div.innerHTML = 'Presiona cualquier tecla<br><small style="color:#fff">keyCode aparece aquí</small>';
+  div.style.cssText = 'position:fixed;top:10px;right:10px;z-index:999999;background:rgba(0,0,0,0.9);color:#e8b94a;padding:16px 20px;border-radius:8px;font-size:1.1rem;font-family:monospace;border:1px solid #e8b94a;min-width:220px;text-align:center';
+  div.innerHTML = 'Presiona ▲ o ▼ del control';
   document.body.appendChild(div);
+
   document.addEventListener('keydown', function(e) {
-    div.innerHTML = 'keyCode: <b>' + e.keyCode + '</b><br>key: <b>' + e.key + '</b>';
+    div.innerHTML = 'keyCode: <b style="font-size:1.4rem">' + e.keyCode + '</b><br>key: <b>' + e.key + '</b><br><small style="color:#aaa">Sigue probando teclas</small>';
   });
 })();
 </script>
+
+
 </body>
 </html>
