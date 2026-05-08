@@ -6130,7 +6130,8 @@
   if (typeof tizen !== 'undefined') {
     ['MediaPlay','MediaPause','MediaStop','MediaPlayPause',
      'MediaFastForward','MediaRewind',
-     'ColorF0Red','ColorF1Green','ColorF2Yellow','ColorF3Blue'
+     'ColorF0Red','ColorF1Green','ColorF2Yellow','ColorF3Blue',
+     'XF86Back','Back'
     ].forEach(function(k){ try{ tizen.tvinputdevice.registerKey(k); }catch(e){} });
   }
 
@@ -6199,30 +6200,29 @@
     if (best) setFocus(best);
   }
 
+  function esBack(e) {
+    return e.keyCode === 10009 || e.key === 'XF86Back' || e.key === 'Back';
+  }
+
   function cerrarPlayer() {
     var frame = document.getElementById('playerFrame');
-    if (frame) { frame.src = 'about:blank'; }
+    if (frame) frame.src = 'about:blank';
     var vid = document.getElementById('playerVideo');
     if (vid) { vid.pause(); vid.src = ''; vid.style.display = 'none'; }
     if (window.hlsInstance) { window.hlsInstance.destroy(); window.hlsInstance = null; }
     if (window.cancelAutoNext) cancelAutoNext();
     clearInterval(window.progressInterval);
     if (window.closeEpPanel) closeEpPanel();
-    var epToggle = document.getElementById('epPanelToggle');
-    var epPrev   = document.getElementById('epQuickPrev');
-    var epNext   = document.getElementById('epQuickNext');
-    if (epToggle) epToggle.classList.remove('visible');
-    if (epPrev)   epPrev.classList.remove('visible');
-    if (epNext)   epNext.classList.remove('visible');
+    ['epPanelToggle','epQuickPrev','epQuickNext'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.remove('visible');
+    });
     var player = document.getElementById('playerPage');
     if (player) {
       player.classList.remove('active');
       player.classList.remove('controls-hidden');
     }
     document.body.style.overflow = '';
-    // Forzar foco de vuelta al documento
-    document.body.setAttribute('tabindex', '-1');
-    document.body.focus();
     setTimeout(function() {
       if (window.showHome) showHome();
       if (window.renderContinueWatching) renderContinueWatching();
@@ -6233,37 +6233,17 @@
     }, 150);
   }
 
-  // ── Mantener foco en documento cuando el player está activo ──
-  // Cada vez que el player se activa, quitamos el foco del iframe
-  var playerPage = document.getElementById('playerPage');
-  if (playerPage) {
-    var _obs = new MutationObserver(function() {
-      if (playerPage.classList.contains('active')) {
-        // Repetir cada 500ms para ganarle al iframe que intenta tomar el foco
-        var _focusInterval = setInterval(function() {
-          if (!playerPage.classList.contains('active')) {
-            clearInterval(_focusInterval);
-            return;
-          }
-          document.body.setAttribute('tabindex', '-1');
-          document.body.focus();
-        }, 500);
-        // Limpiar después de 5s (el player ya cargó)
-        setTimeout(function() { clearInterval(_focusInterval); }, 5000);
-      }
-    });
-    _obs.observe(playerPage, { attributes: true, attributeFilter: ['class'] });
-  }
-
-  // ── Listener en WINDOW — captura antes que el iframe ──
+  // Listener en window con fase de captura — intercepta antes que el iframe
   window.addEventListener('keydown', function(e) {
     var inputActive = document.activeElement &&
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
 
-    if (e.keyCode === 10009) {
+    // BACK
+    if (esBack(e)) {
       e.preventDefault();
       e.stopPropagation();
+      e.stopImmediatePropagation();
 
       var player = document.getElementById('playerPage');
       var detail = document.getElementById('detailPage');
