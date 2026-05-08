@@ -6149,6 +6149,11 @@
 
   var focused = null;
 
+  function clearFocus() {
+    if (focused) focused.classList.remove('tv-focused');
+    focused = null;
+  }
+
   function getFocusables() {
     return Array.from(document.querySelectorAll(
       '.card, .continue-card, .dp-rec-card, .top-card-img, ' +
@@ -6233,13 +6238,21 @@
     }, 150);
   }
 
-  // Listener en window con fase de captura — intercepta antes que el iframe
+  // Limpiar foco cuando el player se abre — SIN body.focus()
+  var playerPage = document.getElementById('playerPage');
+  if (playerPage) {
+    new MutationObserver(function() {
+      if (playerPage.classList.contains('active')) {
+        clearFocus();
+      }
+    }).observe(playerPage, { attributes: true, attributeFilter: ['class'] });
+  }
+
   window.addEventListener('keydown', function(e) {
     var inputActive = document.activeElement &&
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
 
-    // BACK
     if (esBack(e)) {
       e.preventDefault();
       e.stopPropagation();
@@ -6307,7 +6320,6 @@
     }
   }, true);
 
-  // FIX búsqueda
   var _origCloseTvSearchBar = window.closeTvSearchBar;
   if (_origCloseTvSearchBar) {
     window.closeTvSearchBar = function() {
