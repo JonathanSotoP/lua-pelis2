@@ -6124,67 +6124,6 @@
 </div>
 
 <script>
-  // 1. TU LISTA DE PÁGINAS A ROTAR
-  const listaSitios = [
-    "https://luapelis.blogspot.com/2026/05/luapelis.html"
-    // Puedes agregar una coma arriba y poner más enlaces aquí si quieres rotarlos
-  ];
-
-  // 2. TIEMPO DE ESPERA POR PÁGINA (24 horas en milisegundos)
-  // (Si quieres hacer pruebas rápido, cámbialo a 10000 para que sean 10 segundos)
-  const TIEMPO_ESPERA = 24 * 60 * 60 * 1000;
-
-  // 3. LÓGICA DEL ROTADOR PARA EL CUADRO PEQUEÑO
-  (function(){
-    const ahora = Date.now();
-
-    // Usamos un nombre diferente en el storage ("historialIframePequeno")
-    // para que no haga conflicto con tus pruebas anteriores del full-screen
-    let historial = JSON.parse(localStorage.getItem("historialIframePequeno")) || {};
-    let urlParaMostrar = null;
-
-    // Revisamos la lista de páginas
-    for (let i = 0; i < listaSitios.length; i++) {
-      let url = listaSitios[i];
-      let ultimaVezVista = historial[url];
-
-      // Si NUNCA ha visto esta página, o ya pasaron las 24 horas
-      if (!ultimaVezVista || (ahora - ultimaVezVista) > TIEMPO_ESPERA) {
-        urlParaMostrar = url;
-        break;
-      }
-    }
-
-    const contenedorAnuncio = document.getElementById("contenedor-iframe-pequeno");
-
-    if (urlParaMostrar) {
-      // Si hay una página disponible, le ponemos la URL al iframe y lo hacemos visible
-      document.getElementById("iframe-pequeno").src = urlParaMostrar;
-      contenedorAnuncio.style.display = "block";
-
-      // Guardamos que el usuario acaba de ver esta URL
-      historial[urlParaMostrar] = ahora;
-      localStorage.setItem("historialIframePequeno", JSON.stringify(historial));
-
-    } else {
-      // Si ya vio todo, el div se queda en "display: none" y desaparece de tu página web sin dejar espacios en blanco
-      contenedorAnuncio.style.display = "none";
-    }
-  })();
-</script>
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-LD9PCRCG1H"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-LD9PCRCG1H');
-</script>
-  <script>
-// ══════════════════════════════════════════════════════════
-// NAVEGACIÓN D-PAD — Samsung TV (Tizen) v3
-// ══════════════════════════════════════════════════════════
 (function() {
   if (!document.documentElement.classList.contains('tv-mode')) return;
 
@@ -6237,23 +6176,18 @@
   function findNearest(dir) {
     var els = getFocusables();
     if (!els.length) return;
-    if (!focused || !document.contains(focused)) {
-      setFocus(els[0]);
-      return;
-    }
+    if (!focused || !document.contains(focused)) { setFocus(els[0]); return; }
     var cr = focused.getBoundingClientRect();
     var cx = cr.left + cr.width / 2;
     var cy = cr.top + cr.height / 2;
     var best = null, bestScore = Infinity;
-
     els.forEach(function(el) {
       if (el === focused) return;
       var r = el.getBoundingClientRect();
       var ex = r.left + r.width / 2;
       var ey = r.top + r.height / 2;
       var dx = ex - cx, dy = ey - cy;
-      var valid = false;
-      var primary, secondary;
+      var valid = false, primary, secondary;
       if (dir === 'right') { valid = dx > 5;  primary = dx;  secondary = Math.abs(dy); }
       if (dir === 'left')  { valid = dx < -5; primary = -dx; secondary = Math.abs(dy); }
       if (dir === 'down')  { valid = dy > 5;  primary = dy;  secondary = Math.abs(dx); }
@@ -6262,24 +6196,17 @@
       var score = primary + secondary * 2;
       if (score < bestScore) { bestScore = score; best = el; }
     });
-
     if (best) setFocus(best);
   }
 
-  // ── FIX BACK DESDE PLAYER ──────────────────────────────
   function cerrarPlayer() {
-    // 1. Limpiar iframe PRIMERO — devuelve el foco al documento padre
     var frame = document.getElementById('playerFrame');
     if (frame) { frame.src = 'about:blank'; }
     var vid = document.getElementById('playerVideo');
     if (vid) { vid.pause(); vid.src = ''; vid.style.display = 'none'; }
     if (window.hlsInstance) { window.hlsInstance.destroy(); window.hlsInstance = null; }
-
-    // 2. Cancelar timers
     if (window.cancelAutoNext) cancelAutoNext();
     clearInterval(window.progressInterval);
-
-    // 3. Cerrar panel de episodios
     if (window.closeEpPanel) closeEpPanel();
     var epToggle = document.getElementById('epPanelToggle');
     var epPrev   = document.getElementById('epQuickPrev');
@@ -6287,16 +6214,15 @@
     if (epToggle) epToggle.classList.remove('visible');
     if (epPrev)   epPrev.classList.remove('visible');
     if (epNext)   epNext.classList.remove('visible');
-
-    // 4. Ocultar player
     var player = document.getElementById('playerPage');
     if (player) {
       player.classList.remove('active');
       player.classList.remove('controls-hidden');
     }
     document.body.style.overflow = '';
-
-    // 5. Volver al home
+    // Forzar foco de vuelta al documento
+    document.body.setAttribute('tabindex', '-1');
+    document.body.focus();
     setTimeout(function() {
       if (window.showHome) showHome();
       if (window.renderContinueWatching) renderContinueWatching();
@@ -6307,12 +6233,34 @@
     }, 150);
   }
 
-  document.addEventListener('keydown', function(e) {
+  // ── Mantener foco en documento cuando el player está activo ──
+  // Cada vez que el player se activa, quitamos el foco del iframe
+  var playerPage = document.getElementById('playerPage');
+  if (playerPage) {
+    var _obs = new MutationObserver(function() {
+      if (playerPage.classList.contains('active')) {
+        // Repetir cada 500ms para ganarle al iframe que intenta tomar el foco
+        var _focusInterval = setInterval(function() {
+          if (!playerPage.classList.contains('active')) {
+            clearInterval(_focusInterval);
+            return;
+          }
+          document.body.setAttribute('tabindex', '-1');
+          document.body.focus();
+        }, 500);
+        // Limpiar después de 5s (el player ya cargó)
+        setTimeout(function() { clearInterval(_focusInterval); }, 5000);
+      }
+    });
+    _obs.observe(playerPage, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  // ── Listener en WINDOW — captura antes que el iframe ──
+  window.addEventListener('keydown', function(e) {
     var inputActive = document.activeElement &&
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
 
-    // BACK — siempre funciona, incluso desde el iframe
     if (e.keyCode === 10009) {
       e.preventDefault();
       e.stopPropagation();
@@ -6328,11 +6276,8 @@
           var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
           if (el) setFocus(el);
         }, 300);
-
       } else if (player && player.classList.contains('active')) {
-        // Usar nuestra función que limpia el iframe primero
         cerrarPlayer();
-
       } else if (detail && detail.classList.contains('active')) {
         if (window.dpHideDetail) dpHideDetail();
         if (window.showHome) showHome();
@@ -6340,10 +6285,8 @@
           var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
           if (el) setFocus(el);
         }, 300);
-
       } else if (modal && modal.classList.contains('open')) {
         if (window.closeModalBtn) closeModalBtn();
-
       } else {
         if (window.showHome) showHome();
         setTimeout(function() {
@@ -6356,7 +6299,6 @@
 
     if (inputActive) return;
 
-    // D-PAD
     switch(e.keyCode) {
       case 37: e.preventDefault(); findNearest('left');  break;
       case 38: e.preventDefault(); findNearest('up');    break;
@@ -6383,7 +6325,7 @@
         }
         break;
     }
-  }, true); // ← true = captura en fase de captura, antes que el iframe
+  }, true);
 
   // FIX búsqueda
   var _origCloseTvSearchBar = window.closeTvSearchBar;
