@@ -80,5 +80,99 @@
     allow="autoplay; fullscreen; encrypted-media"
     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
   ></iframe>
+
+  <script>
+    // ══════════════════════════════════════════════════════
+    // TIZEN — Registro de teclas del control remoto Samsung
+    // ══════════════════════════════════════════════════════
+    (function registerTizenKeys() {
+      if (typeof tizen === 'undefined') return;
+      var keys = [
+        'MediaPlay', 'MediaPause', 'MediaStop',
+        'MediaFastForward', 'MediaRewind',
+        'MediaPlayPause',
+        'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue',
+        '0','1','2','3','4','5','6','7','8','9',
+        'ChannelUp', 'ChannelDown',
+        'VolumeUp', 'VolumeDown', 'VolumeMute'
+      ];
+      keys.forEach(function(k) {
+        try { tizen.tvinputdevice.registerKey(k); } catch(e) {}
+      });
+    })();
+
+    // ══════════════════════════════════════════════════════
+    // Ocultar splash cuando el iframe terminó de cargar
+    // ══════════════════════════════════════════════════════
+    var frame  = document.getElementById('appFrame');
+    var splash = document.getElementById('splash');
+
+    frame.addEventListener('load', function() {
+      splash.classList.add('hidden');
+      setTimeout(function() { splash.style.display = 'none'; }, 500);
+    });
+
+    // Fallback: ocultar splash a los 12 segundos si no dispara 'load'
+    setTimeout(function() {
+      splash.classList.add('hidden');
+      setTimeout(function() { splash.style.display = 'none'; }, 500);
+    }, 12000);
+
+    // ══════════════════════════════════════════════════════
+    // Interceptar teclas del control remoto y reenviarlas
+    // al iframe — el iframe tiene su propio keydown listener
+    // ══════════════════════════════════════════════════════
+    document.addEventListener('keydown', function(e) {
+      var key = e.keyCode;
+
+      // Botón BACK (XF86Back en Tizen = 10009)
+      if (key === 10009) {
+        e.preventDefault();
+        // Intentar llamar función goBack dentro del iframe
+        try {
+          var win = frame.contentWindow;
+          // Si el iframe expone window.tvBack, úsala
+          if (typeof win.tvBack === 'function') {
+            win.tvBack();
+            return;
+          }
+          // Fallback: simular tecla Escape dentro del iframe
+          var esc = new KeyboardEvent('keydown', {
+            key: 'Escape', keyCode: 27, which: 27, bubbles: true
+          });
+          win.document.dispatchEvent(esc);
+        } catch(e) {}
+        return;
+      }
+
+      // Teclas de navegación y Enter: reenviarlas al iframe
+      // (37=←, 38=↑, 39=→, 40=↓, 13=Enter)
+      var navKeys = [13, 37, 38, 39, 40];
+      if (navKeys.indexOf(key) !== -1) {
+        e.preventDefault();
+        try {
+          var fakeEvent = new KeyboardEvent('keydown', {
+            key: e.key,
+            keyCode: key,
+            which: key,
+            bubbles: true,
+            cancelable: true
+          });
+          frame.contentWindow.document.dispatchEvent(fakeEvent);
+        } catch(e) {}
+        return;
+      }
+
+      // Media keys — reenviar al iframe también
+      try {
+        var mediaEvent = new KeyboardEvent('keydown', {
+          key: e.key,
+          keyCode: key,
+          which: key,
+          bubbles: true
+        });
+        frame.contentWindow.document.dispatchEvent(mediaEvent);
+      } catch(e) {}
+    });
+  </script>
 </body>
-</html>
