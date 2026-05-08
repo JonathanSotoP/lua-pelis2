@@ -6555,5 +6555,19 @@
 
 })();
 </script>
+
+  <script>
+// DETECTOR DE KEYCODES — remover después de identificar
+(function(){
+  if (!document.documentElement.classList.contains('tv-mode')) return;
+  var div = document.createElement('div');
+  div.style.cssText = 'position:fixed;top:10px;right:10px;z-index:999999;background:rgba(0,0,0,0.9);color:#e8b94a;padding:16px 20px;border-radius:8px;font-size:1.1rem;font-family:monospace;border:1px solid #e8b94a;min-width:200px';
+  div.innerHTML = 'Presiona cualquier tecla<br><small style="color:#fff">keyCode aparece aquí</small>';
+  document.body.appendChild(div);
+  document.addEventListener('keydown', function(e) {
+    div.innerHTML = 'keyCode: <b>' + e.keyCode + '</b><br>key: <b>' + e.key + '</b>';
+  });
+})();
+</script>
 </body>
 </html>
