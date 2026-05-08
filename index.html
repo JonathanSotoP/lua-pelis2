@@ -6210,32 +6210,18 @@
   }
 
   function cerrarPlayer() {
-    var frame = document.getElementById('playerFrame');
-    if (frame) frame.src = 'about:blank';
-    var vid = document.getElementById('playerVideo');
-    if (vid) { vid.pause(); vid.src = ''; vid.style.display = 'none'; }
-    if (window.hlsInstance) { window.hlsInstance.destroy(); window.hlsInstance = null; }
-    if (window.cancelAutoNext) cancelAutoNext();
-    clearInterval(window.progressInterval);
-    if (window.closeEpPanel) closeEpPanel();
-    ['epPanelToggle','epQuickPrev','epQuickNext'].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el) el.classList.remove('visible');
-    });
-    var player = document.getElementById('playerPage');
-    if (player) {
-      player.classList.remove('active');
-      player.classList.remove('controls-hidden');
-    }
-    document.body.style.overflow = '';
-    setTimeout(function() {
-      if (window.showHome) showHome();
-      if (window.renderContinueWatching) renderContinueWatching();
+    // Hacer click en el botón ← que ya existe en el player
+    var btnBack = document.querySelector('#playerPage .player-back');
+    if (btnBack) {
+      btnBack.click();
       setTimeout(function() {
-        var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
-        if (el) setFocus(el);
-      }, 400);
-    }, 150);
+        if (window.showHome) showHome();
+        setTimeout(function() {
+          var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
+          if (el) setFocus(el);
+        }, 400);
+      }, 200);
+    }
   }
 
   // Limpiar foco cuando el player se abre — SIN body.focus()
