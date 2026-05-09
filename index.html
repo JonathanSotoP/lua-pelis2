@@ -6124,7 +6124,7 @@
 </div>
 
 
-<script>
+ñ<script>
 (function() {
   if (!document.documentElement.classList.contains('tv-mode')) return;
 
@@ -6187,18 +6187,6 @@
       box-shadow: 0 4px 16px rgba(0,0,0,0.5);
     }
     #tv-mode-toast.show { opacity: 1; }
-
-    /* Overlay capturador SOLO de BACK */
-    #player-key-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 100;
-      pointer-events: none;
-      background: transparent;
-    }
   `;
   document.head.appendChild(style);
 
@@ -6218,7 +6206,6 @@
   var cursorY = window.innerHeight / 2;
   var cursorSpeed = 20;
   var toastTimer = null;
-  var playerOverlay = null;
 
   function showToast(msg) {
     modeToast.textContent = msg;
@@ -6327,54 +6314,12 @@
     return p && p.classList.contains('active');
   }
 
-  // Crear overlay cuando el player se abre
+  // Limpiar foco cuando el player se abre
   var playerPage = document.getElementById('playerPage');
   if (playerPage) {
     new MutationObserver(function() {
       if (playerPage.classList.contains('active')) {
         clearFocus();
-        disableCursor();
-        
-        // Crear overlay
-        if (!playerOverlay) {
-          playerOverlay = document.createElement('div');
-          playerOverlay.id = 'player-key-overlay';
-          playerOverlay.tabIndex = 0;
-          playerPage.appendChild(playerOverlay);
-          
-          // Listener en el overlay — solo captura BACK, deja pasar el resto
-          playerOverlay.addEventListener('keydown', function(e) {
-            if (esBack(e)) {
-              e.preventDefault();
-              e.stopPropagation();
-              if (cursorMode) disableCursor();
-              else enableCursor();
-            }
-            // Cualquier otra tecla (play, pause, flechas, etc.) se deja pasar al iframe
-          });
-          
-          // Darle el foco
-          setTimeout(function() {
-            playerOverlay.focus();
-          }, 500);
-          
-          // Mantener el foco
-          var keepFocus = setInterval(function() {
-            if (!playerPage.classList.contains('active')) {
-              clearInterval(keepFocus);
-              return;
-            }
-            if (document.activeElement !== playerOverlay && !cursorMode) {
-              playerOverlay.focus();
-            }
-          }, 1000);
-        }
-      } else {
-        // Player cerrado — destruir overlay
-        if (playerOverlay && playerOverlay.parentNode) {
-          playerOverlay.parentNode.removeChild(playerOverlay);
-          playerOverlay = null;
-        }
         disableCursor();
       }
     }).observe(playerPage, { attributes: true, attributeFilter: ['class'] });
@@ -6403,21 +6348,31 @@
     }
   }
 
-  // Listener global para modo cursor
-  window.addEventListener('keydown', function(e) {
+  // Listener global en document - BACK se captura antes que el iframe lo reciba
+  document.addEventListener('keydown', function(e) {
     var inputActive = document.activeElement &&
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
 
-    // BACK fuera del player
-    if (esBack(e) && !playerActivo()) {
+    // BACK
+    if (esBack(e)) {
       e.preventDefault();
       e.stopPropagation();
+      e.stopImmediatePropagation();
 
+      var player = document.getElementById('playerPage');
       var detail = document.getElementById('detailPage');
       var tvBar  = document.getElementById('tvSearchBar');
       var modal  = document.getElementById('modalOverlay');
 
+      // Si estamos EN EL PLAYER → toggle cursor
+      if (player && player.classList.contains('active')) {
+        if (cursorMode) disableCursor();
+        else enableCursor();
+        return;
+      }
+
+      // Fuera del player, BACK funciona normal
       if (tvBar && tvBar.classList.contains('open')) {
         if (window.closeTvSearchBar) closeTvSearchBar();
         setTimeout(function() {
@@ -6450,47 +6405,53 @@
       heldKeys[e.keyCode] = true;
       if ([37,38,39,40].indexOf(e.keyCode) !== -1) {
         e.preventDefault();
+        e.stopPropagation();
         startCursorMove();
       }
       if (e.keyCode === 13) {
         e.preventDefault();
+        e.stopPropagation();
         clickAtCursor();
       }
       return;
     }
 
-    // MODO D-PAD normal (fuera del player)
-    if (!playerActivo()) {
-      switch(e.keyCode) {
-        case 37: e.preventDefault(); findNearest('left');  break;
-        case 38: e.preventDefault(); findNearest('up');    break;
-        case 39: e.preventDefault(); findNearest('right'); break;
-        case 40: e.preventDefault(); findNearest('down');  break;
-        case 13:
-          e.preventDefault();
-          if (focused) {
-            focused.click();
-            setTimeout(function() {
-              var searchPage = document.getElementById('searchPage');
-              var tvBar = document.getElementById('tvSearchBar');
-              if (searchPage && searchPage.style.display !== 'none' &&
-                  (!tvBar || !tvBar.classList.contains('open'))) {
-                var firstCard = searchPage.querySelector('.card, .channel-card-compact');
-                if (firstCard) { setFocus(firstCard); return; }
-              }
-              if (!focused || !document.contains(focused) ||
-                  !focused.getBoundingClientRect().width) {
-                var el = getFocusables()[0];
-                if (el) setFocus(el);
-              }
-            }, 400);
-          }
-          break;
-      }
+    // Si estamos en el player SIN cursor → NO bloquear ninguna tecla
+    // Dejar que pasen al iframe para play/pause/adelantar/etc
+    if (playerActivo() && !cursorMode) {
+      return; // No hacer nada, dejar pasar al iframe
     }
-  }, true);
 
-  window.addEventListener('keyup', function(e) {
+    // MODO D-PAD normal (fuera del player)
+    switch(e.keyCode) {
+      case 37: e.preventDefault(); findNearest('left');  break;
+      case 38: e.preventDefault(); findNearest('up');    break;
+      case 39: e.preventDefault(); findNearest('right'); break;
+      case 40: e.preventDefault(); findNearest('down');  break;
+      case 13:
+        e.preventDefault();
+        if (focused) {
+          focused.click();
+          setTimeout(function() {
+            var searchPage = document.getElementById('searchPage');
+            var tvBar = document.getElementById('tvSearchBar');
+            if (searchPage && searchPage.style.display !== 'none' &&
+                (!tvBar || !tvBar.classList.contains('open'))) {
+              var firstCard = searchPage.querySelector('.card, .channel-card-compact');
+              if (firstCard) { setFocus(firstCard); return; }
+            }
+            if (!focused || !document.contains(focused) ||
+                !focused.getBoundingClientRect().width) {
+              var el = getFocusables()[0];
+              if (el) setFocus(el);
+            }
+          }, 400);
+        }
+        break;
+    }
+  }, true); // Fase de captura — llega antes que al iframe
+
+  document.addEventListener('keyup', function(e) {
     if (cursorMode) {
       delete heldKeys[e.keyCode];
       stopCursorMove();
@@ -6525,6 +6486,7 @@
 
 })();
 </script>
+
 
 
 
