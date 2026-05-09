@@ -6144,10 +6144,109 @@
       z-index: 20 !important;
       position: relative !important;
     }
+    
+    /* Cursor virtual */
+    #tv-cursor {
+      position: fixed;
+      width: 24px;
+      height: 24px;
+      background: rgba(232,185,74,0.9);
+      border: 3px solid #fff;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 999999;
+      transform: translate(-50%, -50%);
+      display: none;
+      box-shadow: 0 0 12px rgba(232,185,74,0.8), 0 0 24px rgba(232,185,74,0.4);
+      transition: background 0.15s, transform 0.15s;
+    }
+    #tv-cursor.active { display: block; }
+    #tv-cursor.clicking {
+      background: rgba(255,255,255,0.95);
+      transform: translate(-50%,-50%) scale(0.7);
+    }
+
+    /* Toast de modo */
+    #tv-mode-toast {
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(14,14,14,0.95);
+      border: 2px solid #e8b94a;
+      color: #e8b94a;
+      padding: 12px 28px;
+      border-radius: 24px;
+      font-size: 1rem;
+      font-weight: 700;
+      z-index: 999998;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+    #tv-mode-toast.show { opacity: 1; }
   `;
   document.head.appendChild(style);
 
+  // Crear cursor virtual
+  var cursor = document.createElement('div');
+  cursor.id = 'tv-cursor';
+  document.body.appendChild(cursor);
+
+  // Crear toast
+  var modeToast = document.createElement('div');
+  modeToast.id = 'tv-mode-toast';
+  document.body.appendChild(modeToast);
+
   var focused = null;
+  var cursorMode = false;
+  var cursorX = window.innerWidth / 2;
+  var cursorY = window.innerHeight / 2;
+  var cursorSpeed = 20;
+  var toastTimer = null;
+
+  function showToast(msg) {
+    modeToast.textContent = msg;
+    modeToast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() { modeToast.classList.remove('show'); }, 2000);
+  }
+
+  function enableCursor() {
+    cursorMode = true;
+    cursorX = window.innerWidth / 2;
+    cursorY = window.innerHeight / 2;
+    cursor.style.left = cursorX + 'px';
+    cursor.style.top  = cursorY + 'px';
+    cursor.classList.add('active');
+    clearFocus();
+    showToast('🖱 Puntero activado');
+  }
+
+  function disableCursor() {
+    cursorMode = false;
+    cursor.classList.remove('active');
+    showToast('🎮 Puntero desactivado');
+  }
+
+  function moveCursor(dx, dy) {
+    cursorX = Math.max(0, Math.min(window.innerWidth,  cursorX + dx));
+    cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + dy));
+    cursor.style.left = cursorX + 'px';
+    cursor.style.top  = cursorY + 'px';
+  }
+
+  function clickAtCursor() {
+    cursor.classList.add('clicking');
+    setTimeout(function() { cursor.classList.remove('clicking'); }, 200);
+    var el = document.elementFromPoint(cursorX, cursorY);
+    if (el) {
+      el.click();
+      var clickable = el.closest('button,a,[onclick],.player-back,.source-btn,.btn-play,.dp-play-btn');
+      if (clickable) clickable.click();
+    }
+  }
 
   function clearFocus() {
     if (focused) focused.classList.remove('tv-focused');
@@ -6209,29 +6308,43 @@
     return e.keyCode === 10009 || e.key === 'XF86Back' || e.key === 'Back';
   }
 
-  function cerrarPlayer() {
-    // Hacer click en el botón ← que ya existe en el player
-    var btnBack = document.querySelector('#playerPage .player-back');
-    if (btnBack) {
-      btnBack.click();
-      setTimeout(function() {
-        if (window.showHome) showHome();
-        setTimeout(function() {
-          var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
-          if (el) setFocus(el);
-        }, 400);
-      }, 200);
-    }
+  function playerActivo() {
+    var p = document.getElementById('playerPage');
+    return p && p.classList.contains('active');
   }
 
-  // Limpiar foco cuando el player se abre — SIN body.focus()
+  // Limpiar foco cuando el player se abre
   var playerPage = document.getElementById('playerPage');
   if (playerPage) {
     new MutationObserver(function() {
       if (playerPage.classList.contains('active')) {
         clearFocus();
+        disableCursor(); // Asegurar que el cursor esté desactivado al abrir player
       }
     }).observe(playerPage, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  // Mantener tecla presionada para mover cursor
+  var heldKeys = {};
+  var cursorMoveInterval = null;
+
+  function startCursorMove() {
+    if (cursorMoveInterval) return;
+    cursorMoveInterval = setInterval(function() {
+      var dx = 0, dy = 0;
+      if (heldKeys[37]) dx -= cursorSpeed;
+      if (heldKeys[39]) dx += cursorSpeed;
+      if (heldKeys[38]) dy -= cursorSpeed;
+      if (heldKeys[40]) dy += cursorSpeed;
+      if (dx || dy) moveCursor(dx, dy);
+    }, 16);
+  }
+
+  function stopCursorMove() {
+    if (!heldKeys[37] && !heldKeys[38] && !heldKeys[39] && !heldKeys[40]) {
+      clearInterval(cursorMoveInterval);
+      cursorMoveInterval = null;
+    }
   }
 
   window.addEventListener('keydown', function(e) {
@@ -6239,6 +6352,7 @@
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
 
+    // BACK
     if (esBack(e)) {
       e.preventDefault();
       e.stopPropagation();
@@ -6249,14 +6363,20 @@
       var tvBar  = document.getElementById('tvSearchBar');
       var modal  = document.getElementById('modalOverlay');
 
+      // Si estamos EN EL PLAYER → toggle cursor
+      if (player && player.classList.contains('active')) {
+        if (cursorMode) disableCursor();
+        else enableCursor();
+        return;
+      }
+
+      // Fuera del player, BACK funciona normal
       if (tvBar && tvBar.classList.contains('open')) {
         if (window.closeTvSearchBar) closeTvSearchBar();
         setTimeout(function() {
           var el = document.querySelector('.tv-nav-item.active') || getFocusables()[0];
           if (el) setFocus(el);
         }, 300);
-      } else if (player && player.classList.contains('active')) {
-        cerrarPlayer();
       } else if (detail && detail.classList.contains('active')) {
         if (window.dpHideDetail) dpHideDetail();
         if (window.showHome) showHome();
@@ -6278,6 +6398,21 @@
 
     if (inputActive) return;
 
+    // MODO CURSOR (solo dentro del player)
+    if (cursorMode && playerActivo()) {
+      heldKeys[e.keyCode] = true;
+      if ([37,38,39,40].indexOf(e.keyCode) !== -1) {
+        e.preventDefault();
+        startCursorMove();
+      }
+      if (e.keyCode === 13) {
+        e.preventDefault();
+        clickAtCursor();
+      }
+      return;
+    }
+
+    // MODO D-PAD normal
     switch(e.keyCode) {
       case 37: e.preventDefault(); findNearest('left');  break;
       case 38: e.preventDefault(); findNearest('up');    break;
@@ -6305,6 +6440,13 @@
         break;
     }
   }, true);
+
+  window.addEventListener('keyup', function(e) {
+    if (cursorMode) {
+      delete heldKeys[e.keyCode];
+      stopCursorMove();
+    }
+  });
 
   var _origCloseTvSearchBar = window.closeTvSearchBar;
   if (_origCloseTvSearchBar) {
@@ -6334,6 +6476,7 @@
 
 })();
 </script>
+
 
 <script>
 (function(){
