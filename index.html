@@ -6186,6 +6186,18 @@
       box-shadow: 0 4px 16px rgba(0,0,0,0.5);
     }
     #tv-mode-toast.show { opacity: 1; }
+
+    /* Overlay capturador de teclas sobre el iframe */
+    #player-key-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 100;
+      pointer-events: none;
+      background: transparent;
+    }
   `;
   document.head.appendChild(style);
 
@@ -6205,6 +6217,7 @@
   var cursorY = window.innerHeight / 2;
   var cursorSpeed = 20;
   var toastTimer = null;
+  var playerOverlay = null;
 
   function showToast(msg) {
     modeToast.textContent = msg;
@@ -6313,13 +6326,44 @@
     return p && p.classList.contains('active');
   }
 
-  // Limpiar foco cuando el player se abre
+  // Crear/destruir overlay cuando el player se abre/cierra
   var playerPage = document.getElementById('playerPage');
   if (playerPage) {
     new MutationObserver(function() {
       if (playerPage.classList.contains('active')) {
         clearFocus();
-        disableCursor(); // Asegurar que el cursor esté desactivado al abrir player
+        disableCursor();
+        
+        // Crear overlay sobre el player que capture teclas
+        if (!playerOverlay) {
+          playerOverlay = document.createElement('div');
+          playerOverlay.id = 'player-key-overlay';
+          playerOverlay.tabIndex = 0; // Hacerlo focuseable
+          playerPage.appendChild(playerOverlay);
+          
+          // Darle el foco al overlay
+          setTimeout(function() {
+            playerOverlay.focus();
+          }, 500);
+          
+          // Mantener el foco en el overlay cada 1s
+          var keepFocus = setInterval(function() {
+            if (!playerPage.classList.contains('active')) {
+              clearInterval(keepFocus);
+              return;
+            }
+            if (document.activeElement !== playerOverlay) {
+              playerOverlay.focus();
+            }
+          }, 1000);
+        }
+      } else {
+        // Player cerrado — destruir overlay
+        if (playerOverlay && playerOverlay.parentNode) {
+          playerOverlay.parentNode.removeChild(playerOverlay);
+          playerOverlay = null;
+        }
+        disableCursor();
       }
     }).observe(playerPage, { attributes: true, attributeFilter: ['class'] });
   }
@@ -6476,6 +6520,7 @@
 
 })();
 </script>
+
 
 
 <script>
