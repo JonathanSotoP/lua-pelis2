@@ -6124,15 +6124,14 @@
 </div>
 
 
-ñ<script>
+<script>
 (function() {
   if (!document.documentElement.classList.contains('tv-mode')) return;
 
   if (typeof tizen !== 'undefined') {
     ['MediaPlay','MediaPause','MediaStop','MediaPlayPause',
      'MediaFastForward','MediaRewind',
-     'ColorF0Red','ColorF1Green','ColorF2Yellow','ColorF3Blue',
-     'XF86Back','Back'
+     'ColorF0Red','ColorF1Green','ColorF2Yellow','ColorF3Blue'
     ].forEach(function(k){ try{ tizen.tvinputdevice.registerKey(k); }catch(e){} });
   }
 
@@ -6146,7 +6145,6 @@
       position: relative !important;
     }
     
-    /* Cursor virtual */
     #tv-cursor {
       position: fixed;
       width: 24px;
@@ -6167,7 +6165,6 @@
       transform: translate(-50%,-50%) scale(0.7);
     }
 
-    /* Toast de modo */
     #tv-mode-toast {
       position: fixed;
       bottom: 100px;
@@ -6187,18 +6184,47 @@
       box-shadow: 0 4px 16px rgba(0,0,0,0.5);
     }
     #tv-mode-toast.show { opacity: 1; }
+    
+    /* Indicador de progreso circular */
+    #tv-hold-progress {
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 60px;
+      height: 60px;
+      z-index: 999997;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    #tv-hold-progress.show { opacity: 1; }
+    #tv-hold-progress svg {
+      transform: rotate(-90deg);
+    }
+    #tv-hold-progress circle {
+      fill: none;
+      stroke: #e8b94a;
+      stroke-width: 4;
+      stroke-dasharray: 157;
+      stroke-dashoffset: 157;
+      transition: stroke-dashoffset 0.1s linear;
+    }
   `;
   document.head.appendChild(style);
 
-  // Crear cursor virtual
   var cursor = document.createElement('div');
   cursor.id = 'tv-cursor';
   document.body.appendChild(cursor);
 
-  // Crear toast
   var modeToast = document.createElement('div');
   modeToast.id = 'tv-mode-toast';
   document.body.appendChild(modeToast);
+  
+  var holdProgress = document.createElement('div');
+  holdProgress.id = 'tv-hold-progress';
+  holdProgress.innerHTML = '<svg width="60" height="60"><circle cx="30" cy="30" r="25"></circle></svg>';
+  document.body.appendChild(holdProgress);
 
   var focused = null;
   var cursorMode = false;
@@ -6206,6 +6232,9 @@
   var cursorY = window.innerHeight / 2;
   var cursorSpeed = 20;
   var toastTimer = null;
+  var okHoldTimer = null;
+  var okHoldStartTime = 0;
+  var okHoldInterval = null;
 
   function showToast(msg) {
     modeToast.textContent = msg;
@@ -6305,27 +6334,20 @@
     if (best) setFocus(best);
   }
 
-  function esBack(e) {
-    return e.keyCode === 10009 || e.key === 'XF86Back' || e.key === 'Back';
-  }
-
   function playerActivo() {
     var p = document.getElementById('playerPage');
     return p && p.classList.contains('active');
   }
 
-  // Limpiar foco cuando el player se abre
   var playerPage = document.getElementById('playerPage');
   if (playerPage) {
     new MutationObserver(function() {
       if (playerPage.classList.contains('active')) {
         clearFocus();
-        disableCursor();
       }
     }).observe(playerPage, { attributes: true, attributeFilter: ['class'] });
   }
 
-  // Mantener tecla presionada para mover cursor
   var heldKeys = {};
   var cursorMoveInterval = null;
 
@@ -6348,31 +6370,75 @@
     }
   }
 
-  // Listener global en document - BACK se captura antes que el iframe lo reciba
   document.addEventListener('keydown', function(e) {
     var inputActive = document.activeElement &&
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
 
-    // BACK
-    if (esBack(e)) {
+    // OK/Enter hold detector (funciona en todo momento)
+    if (e.keyCode === 13) {
+      if (!okHoldTimer) {
+        okHoldStartTime = Date.now();
+        holdProgress.classList.add('show');
+        var circle = holdProgress.querySelector('circle');
+        
+        okHoldInterval = setInterval(function() {
+          var elapsed = Date.now() - okHoldStartTime;
+          var progress = Math.min(elapsed / 2000, 1); // 2 segundos
+          var offset = 157 - (157 * progress);
+          circle.style.strokeDashoffset = offset;
+        }, 50);
+        
+        okHoldTimer = setTimeout(function() {
+          clearInterval(okHoldInterval);
+          holdProgress.classList.remove('show');
+          circle.style.strokeDashoffset = 157;
+          if (cursorMode) disableCursor();
+          else enableCursor();
+          okHoldTimer = null;
+        }, 2000);
+      }
+      
+      // Si el cursor está activo, NO prevenir el click
+      if (cursorMode) {
+        return; // Dejar que el cursor haga click
+      }
+      
+      // Si estamos en el player sin cursor, NO prevenir (dejar pasar al iframe)
+      if (playerActivo() && !cursorMode) {
+        return;
+      }
+      
+      // Prevenir solo cuando estamos en modo D-pad normal
       e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
+      return;
+    }
 
-      var player = document.getElementById('playerPage');
+    if (inputActive) return;
+
+    // MODO CURSOR
+    if (cursorMode) {
+      heldKeys[e.keyCode] = true;
+      if ([37,38,39,40].indexOf(e.keyCode) !== -1) {
+        e.preventDefault();
+        e.stopPropagation();
+        startCursorMove();
+      }
+      // El Enter ya NO se previene aquí - se maneja arriba
+      return;
+    }
+
+    // Player activo sin cursor - permitir todas las teclas pasar al iframe
+    if (playerActivo() && !cursorMode) {
+      return;
+    }
+
+    // BACK fuera del player
+    if (e.keyCode === 10009 || e.key === 'XF86Back' || e.key === 'Back') {
+      e.preventDefault();
       var detail = document.getElementById('detailPage');
       var tvBar  = document.getElementById('tvSearchBar');
       var modal  = document.getElementById('modalOverlay');
-
-      // Si estamos EN EL PLAYER → toggle cursor
-      if (player && player.classList.contains('active')) {
-        if (cursorMode) disableCursor();
-        else enableCursor();
-        return;
-      }
-
-      // Fuera del player, BACK funciona normal
       if (tvBar && tvBar.classList.contains('open')) {
         if (window.closeTvSearchBar) closeTvSearchBar();
         setTimeout(function() {
@@ -6398,38 +6464,14 @@
       return;
     }
 
-    if (inputActive) return;
-
-    // MODO CURSOR (solo dentro del player)
-    if (cursorMode && playerActivo()) {
-      heldKeys[e.keyCode] = true;
-      if ([37,38,39,40].indexOf(e.keyCode) !== -1) {
-        e.preventDefault();
-        e.stopPropagation();
-        startCursorMove();
-      }
-      if (e.keyCode === 13) {
-        e.preventDefault();
-        e.stopPropagation();
-        clickAtCursor();
-      }
-      return;
-    }
-
-    // Si estamos en el player SIN cursor → NO bloquear ninguna tecla
-    // Dejar que pasen al iframe para play/pause/adelantar/etc
-    if (playerActivo() && !cursorMode) {
-      return; // No hacer nada, dejar pasar al iframe
-    }
-
-    // MODO D-PAD normal (fuera del player)
+    // D-PAD normal
     switch(e.keyCode) {
       case 37: e.preventDefault(); findNearest('left');  break;
       case 38: e.preventDefault(); findNearest('up');    break;
       case 39: e.preventDefault(); findNearest('right'); break;
       case 40: e.preventDefault(); findNearest('down');  break;
       case 13:
-        e.preventDefault();
+        // Ya manejado arriba
         if (focused) {
           focused.click();
           setTimeout(function() {
@@ -6449,9 +6491,27 @@
         }
         break;
     }
-  }, true); // Fase de captura — llega antes que al iframe
+  }, true);
 
   document.addEventListener('keyup', function(e) {
+    // OK released
+    if (e.keyCode === 13) {
+      if (okHoldTimer) {
+        clearTimeout(okHoldTimer);
+        clearInterval(okHoldInterval);
+        okHoldTimer = null;
+        holdProgress.classList.remove('show');
+        var circle = holdProgress.querySelector('circle');
+        circle.style.strokeDashoffset = 157;
+        
+        // Si soltamos antes de 2s Y el cursor está activo, hacer click
+        if (cursorMode) {
+          clickAtCursor();
+        }
+      }
+      return;
+    }
+    
     if (cursorMode) {
       delete heldKeys[e.keyCode];
       stopCursorMove();
@@ -6486,6 +6546,7 @@
 
 })();
 </script>
+
 
 
 
