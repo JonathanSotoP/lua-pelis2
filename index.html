@@ -6376,7 +6376,9 @@
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
 
-    // OK/Enter hold detector
+    // ══════════════════════════════════════════════════════
+    // OK HOLD DETECTOR — SIEMPRE SE EJECUTA PRIMERO
+    // ══════════════════════════════════════════════════════
     if (e.keyCode === 13 && !okHoldTimer) {
       okWasHeld = false;
       okHoldStartTime = Date.now();
@@ -6399,6 +6401,12 @@
         else enableCursor();
         okHoldTimer = null;
       }, 2000);
+      
+      // Si estamos en el player sin cursor, SOLO iniciamos el timer
+      // y permitimos que el click pase al iframe
+      if (playerActivo() && !cursorMode) {
+        return; // Dejar que el iframe reciba el click
+      }
     }
 
     if (inputActive) return;
@@ -6410,13 +6418,14 @@
         e.preventDefault();
         e.stopPropagation();
         startCursorMove();
-        return; // ← CRÍTICO: salir aquí para que no llegue al D-pad
+        return;
       }
       return;
     }
 
-    // Player activo sin cursor - permitir todas las teclas pasar al iframe
+    // Player activo sin cursor - permitir todas las teclas (excepto OK que ya se manejó arriba)
     if (playerActivo() && !cursorMode) {
+      // Las flechas y otras teclas pasan al iframe libremente
       return;
     }
 
@@ -6458,7 +6467,7 @@
       case 39: e.preventDefault(); findNearest('right'); break;
       case 40: e.preventDefault(); findNearest('down');  break;
       case 13:
-        // NO prevenir aquí - dejar que el timer lo maneje
+        // NO prevenir aquí - el hold detector ya lo manejó arriba
         break;
     }
   }, true);
@@ -6478,8 +6487,8 @@
         if (cursorMode && !okWasHeld) {
           clickAtCursor();
         }
-        // Si soltamos antes de 2s Y cursor desactivado → click normal del elemento enfocado
-        else if (!cursorMode && !okWasHeld && focused) {
+        // Si soltamos antes de 2s Y cursor desactivado Y NO estamos en player → click normal
+        else if (!cursorMode && !okWasHeld && !playerActivo() && focused) {
           focused.click();
           setTimeout(function() {
             var searchPage = document.getElementById('searchPage');
@@ -6496,6 +6505,7 @@
             }
           }, 400);
         }
+        // Si estamos en el player, el click ya pasó al iframe
       }
       okWasHeld = false;
       return;
@@ -6535,7 +6545,6 @@
 
 })();
 </script>
-
 
 
 
