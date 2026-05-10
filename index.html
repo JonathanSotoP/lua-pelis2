@@ -1997,76 +1997,93 @@
 <body>
 <!-- SPLASH SCREEN -->
 <!-- SPLASH SCREEN -->
-<div id="splashScreen" style="
+<div id="splashScreen">
+  <!-- Logo del gato -->
+  <img src="icon.png" alt="LuaPelis" class="splash-logo">
+  
+  <!-- Texto LUA PELIS -->
+  <div class="splash-title">LUA PELIS</div>
+  
+  <!-- Spinner giratorio -->
+  <div class="splash-spinner"></div>
+  
+  <!-- Texto "Cargando..." -->
+  <div class="splash-loading">Cargando...</div>
+  
+  <!-- Texto dedicatoria -->
+  <div class="splash-credits">App creada con amor para Selfi ❤️</div>
+</div>
+
+<style>
+#splashScreen {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  background: #000;
-  z-index: 999999;
+  width: 100vw;
+  height: 100vh;
+  background-color: #000000;
+  z-index: 9999999;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-">
-  <!-- Logo del gato -->
-  <img src="icon.png" alt="LuaPelis" style="
-    width: 200px;
-    height: 200px;
-    object-fit: contain;
-    margin-bottom: 20px;
-    animation: fadeIn 0.8s ease-in-out;
-  ">
-  
-  <!-- Texto LUA PELIS -->
-  <div style="
-    font-size: 2.5rem;
-    font-weight: 900;
-    color: #e8b94a;
-    letter-spacing: 3px;
-    margin-bottom: 40px;
-    animation: fadeIn 1s ease-in-out 0.3s backwards;
-  ">LUA PELIS</div>
-  
-  <!-- Spinner giratorio -->
-  <div style="
-    width: 50px;
-    height: 50px;
-    border: 4px solid rgba(232,185,74,0.2);
-    border-top-color: #e8b94a;
-    border-radius: 50%;
-    animation: spin 1s linear infinite, fadeIn 1s ease-in-out 0.5s backwards;
-    margin-bottom: 15px;
-  "></div>
-  
-  <!-- Texto "Cargando..." -->
-  <div style="
-    font-size: 1rem;
-    color: #e8b94a;
-    font-weight: 600;
-    margin-bottom: 30px;
-    animation: fadeIn 1s ease-in-out 0.7s backwards;
-  ">Cargando...</div>
-  
-  <!-- Texto dedicatoria -->
-  <div style="
-    font-size: 0.85rem;
-    color: rgba(232,185,74,0.5);
-    font-weight: 400;
-    text-align: center;
-    animation: fadeIn 1s ease-in-out 0.9s backwards;
-  ">App creada con amor para Selfi ❤️</div>
-</div>
+}
 
-<style>
-@keyframes spin {
+.splash-logo {
+  width: 200px;
+  height: 200px;
+  object-fit: contain;
+  margin-bottom: 20px;
+  opacity: 0;
+  animation: splashFadeIn 0.8s ease-in-out forwards;
+}
+
+.splash-title {
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: #e8b94a;
+  letter-spacing: 3px;
+  margin-bottom: 40px;
+  opacity: 0;
+  animation: splashFadeIn 1s ease-in-out 0.3s forwards;
+}
+
+.splash-spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid rgba(232,185,74,0.2);
+  border-top: 4px solid #e8b94a;
+  border-radius: 50%;
+  margin-bottom: 15px;
+  opacity: 0;
+  animation: splashFadeIn 1s ease-in-out 0.5s forwards, spinRotate 1s linear 0.5s infinite;
+}
+
+.splash-loading {
+  font-size: 1rem;
+  color: #e8b94a;
+  font-weight: 600;
+  margin-bottom: 30px;
+  opacity: 0;
+  animation: splashFadeIn 1s ease-in-out 0.7s forwards;
+}
+
+.splash-credits {
+  font-size: 0.85rem;
+  color: rgba(232,185,74,0.5);
+  font-weight: 400;
+  text-align: center;
+  opacity: 0;
+  animation: splashFadeIn 1s ease-in-out 0.9s forwards;
+}
+
+@keyframes spinRotate {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
 
-@keyframes fadeIn {
+@keyframes splashFadeIn {
   from {
     opacity: 0;
     transform: translateY(10px);
@@ -2077,31 +2094,34 @@
   }
 }
 
-#splashScreen.fade-out {
-  animation: splashFadeOut 0.5s ease-out forwards;
-}
-
 @keyframes splashFadeOut {
+  from {
+    opacity: 1;
+  }
   to {
     opacity: 0;
-    visibility: hidden;
   }
+}
+
+#splashScreen.hidden {
+  animation: splashFadeOut 0.5s ease-out forwards;
+  pointer-events: none;
 }
 </style>
 
 <script>
-// Remover splash screen después de que cargue la página
-window.addEventListener('load', function() {
+(function() {
+  // Remover splash screen después de 5 segundos
   setTimeout(function() {
     var splash = document.getElementById('splashScreen');
     if (splash) {
-      splash.classList.add('fade-out');
+      splash.classList.add('hidden');
       setTimeout(function() {
-        splash.remove();
+        splash.style.display = 'none';
       }, 500);
     }
-  }, 5000); // 5 segundos mínimo de splash
-});
+  }, 5000);
+})();
 </script>
 <!-- FINAL PANTALLA DE CARGA -->
 
