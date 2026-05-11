@@ -4713,7 +4713,7 @@
   }
 
   function createCard(item,type='movie'){
-    const div=document.createElement('div');div.className='card';
+    const div=document.createElement('div');div.className='card';div.setAttribute('tabindex','0');
     const title=item.title||item.name||'',year=(item.release_date||item.first_air_date||'').slice(0,4);
     const rating=item.vote_average?item.vote_average.toFixed(1):'?',poster=item.poster_path?`${IMG}${IMG_SIZE}${item.poster_path}`:'';
     const mtype=item.media_type||type;
@@ -4927,7 +4927,7 @@
   function tvImgError(img){ img.onerror=null; img.src=TV_PLACEHOLDER; }
 
   function createCompactChannelCard(channel){
-    const div=document.createElement('div');div.className='channel-card-compact';div.onclick=()=>openIPTVChannel(channel);
+    const div=document.createElement('div');div.className='channel-card-compact';div.setAttribute('tabindex','0');div.onclick=()=>openIPTVChannel(channel);
     const logoUrl=channel.logo&&channel.logo.startsWith('http')?channel.logo:TV_PLACEHOLDER;
     // onerror llama a tvImgError(this) — sin interpolación de strings dentro del atributo HTML
     div.innerHTML=`<img class="channel-logo-compact" src="${logoUrl}" alt="${escapeHtml(channel.name)}" onerror="tvImgError(this)"><div class="channel-info-compact"><div class="channel-name-compact">${escapeHtml(channel.name)} <span class="live-badge-compact">EN VIVO</span></div><div class="channel-country-compact">${channel.country?'🌍 '+channel.country:(channel.group?'📡 '+channel.group:'📺 TV')}</div></div>`;
@@ -6662,6 +6662,27 @@
       }, 300);
     };
   }
+
+  // ── FIX D-PAD BÚSQUEDA TV: al terminar de renderizar resultados,
+  //    hacer blur del input y poner foco en la primera card ──
+  var _origDoSearchUnified = window.doSearchUnified;
+  window.doSearchUnified = function(query) {
+    return _origDoSearchUnified.apply(this, arguments).then(function() {
+      // Quitar foco del input de búsqueda TV
+      var tvInput = document.getElementById('tvSearchBarInput');
+      if (tvInput) tvInput.blur();
+      // Poner foco D-Pad en la primera card de resultados
+      setTimeout(function() {
+        var firstCard = document.querySelector(
+          '#searchPage .card, #searchPage .channel-card-compact'
+        );
+        if (firstCard) {
+          firstCard.setAttribute('tabindex', '0');
+          setFocus(firstCard);
+        }
+      }, 300);
+    });
+  };
 
   document.addEventListener('mousedown', function() {
     if (focused) focused.classList.remove('tv-focused');
