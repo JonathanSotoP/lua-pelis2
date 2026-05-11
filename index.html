@@ -2207,12 +2207,14 @@
     <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
   </svg>
   <input type="text" id="tvSearchBarInput"
-       placeholder="Buscar películas, series, canales..."
-       autocomplete="off" enterkeyhint="search" spellcheck="false"
-       onkeydown="if(event.key==='Escape')closeTvSearchBar();"
-       onchange="if(this.value.trim()){handleSearch(this.value);}"
-       onfocus="try{AndroidKeyboard.showKeyboard()}catch(e){}"
-       onblur="try{AndroidKeyboard.hideKeyboard()}catch(e){}">
+         placeholder="Buscar películas, series, canales..."
+         autocomplete="off" spellcheck="false"
+         onkeydown="if(event.key==='Escape')closeTvSearchBar();">
+  <button class="tv-search-bar-close tv-search-bar-go"
+          onclick="tvDoSearch()"
+          style="width:auto;padding:0 16px;border-radius:20px;background:var(--accent);color:#000;font-weight:700;font-size:0.82rem;border:none;">
+    Buscar
+  </button>
   <button class="tv-search-bar-close" onclick="closeTvSearchBar()" title="Cerrar búsqueda">✕</button>
 </div>
 
@@ -4230,58 +4232,45 @@
   function closeMobileMenu(){ /* legacy - no-op */ }
 
   // ── TV: abrir/cerrar barra de búsqueda superior ──────────────────────
-  function openTvSearchBar(){
-    var bar = document.getElementById('tvSearchBar');
-    if(!bar) return;
-    bar.classList.add('open');
-    document.body.classList.add('tv-search-open');
-    // Mostrar página de búsqueda vacía para que los resultados aparezcan debajo
-    document.getElementById('homePage').classList.add('hidden');
-    document.getElementById('channelsPage').classList.remove('active');
-    document.getElementById('animePage').classList.remove('active');
-    document.getElementById('moviesPage').classList.remove('active');
-    document.getElementById('seriesPage').classList.remove('active');
-    document.getElementById('detailPage').classList.remove('active');
-    document.getElementById('searchPage').style.display='block';
-    document.getElementById('searchResultsContainer').innerHTML='';
-    document.getElementById('resultsTitle').textContent='';
-    document.getElementById('resultsCount').textContent='Escribe para buscar...';
-    setTimeout(function(){
+  function tvDoSearch(){
   var inp = document.getElementById('tvSearchBarInput');
-  if(!inp) return;
-  inp.value = '';
-  inp.focus();
-  inp.select();
-  try { AndroidKeyboard.showKeyboard(); } catch(e) {}
-  try { AndroidStorage.showKeyboard(); }  catch(e) {}
+  if(!inp || !inp.value.trim()) return;
+  var query = inp.value.trim();
+  inp.blur();
+  doSearchUnified(query);
+}
 
-  // Tizen: "Completado" dispara 'change' o 'search'
-  // Registrar solo una vez para no duplicar listeners
-  if(!inp._tizenSearchBound) {
-    inp._tizenSearchBound = true;
-    inp.addEventListener('search', function() {
-      if(inp.value.trim()) handleSearch(inp.value);
-    });
-    // Samsung a veces dispara keyCode 65376 (tecla Completado)
-    inp.addEventListener('keydown', function(e) {
-      if(e.keyCode === 65376 || e.keyCode === 10182) {
-        if(inp.value.trim()) handleSearch(inp.value);
-      }
-    });
-  }
-}, 150);
-  }
-
-  function closeTvSearchBar(){
-    var bar = document.getElementById('tvSearchBar');
-    if(bar) bar.classList.remove('open');
-    document.body.classList.remove('tv-search-open');
+function openTvSearchBar(){
+  var bar = document.getElementById('tvSearchBar');
+  if(!bar) return;
+  bar.classList.add('open');
+  document.body.classList.add('tv-search-open');
+  document.getElementById('homePage').classList.add('hidden');
+  document.getElementById('channelsPage').classList.remove('active');
+  document.getElementById('animePage').classList.remove('active');
+  document.getElementById('moviesPage').classList.remove('active');
+  document.getElementById('seriesPage').classList.remove('active');
+  document.getElementById('detailPage').classList.remove('active');
+  document.getElementById('searchPage').style.display='block';
+  document.getElementById('searchResultsContainer').innerHTML='';
+  document.getElementById('resultsTitle').textContent='';
+  document.getElementById('resultsCount').textContent='Escribe para buscar...';
+  setTimeout(function(){
     var inp = document.getElementById('tvSearchBarInput');
-    if(inp) inp.value = '';
-    try { AndroidKeyboard.hideKeyboard(); } catch(e) {}
-    // NO llamar showHome() aquí — los resultados de búsqueda deben permanecer visibles
-    // Solo cerrar la barra de búsqueda
-  }
+    if(!inp) return;
+    inp.value = '';
+    inp.focus();
+  }, 150);
+}
+
+function closeTvSearchBar(){
+  var bar = document.getElementById('tvSearchBar');
+  if(bar) bar.classList.remove('open');
+  document.body.classList.remove('tv-search-open');
+  var inp = document.getElementById('tvSearchBarInput');
+  if(inp) inp.value = '';
+  try { AndroidKeyboard.hideKeyboard(); } catch(e) {}
+}
 
   function openMobileSearch(){
     var isTV = document.documentElement.classList.contains('tv-mode');
