@@ -6516,10 +6516,52 @@ function closeTvSearchBar(){
   }
 
   document.addEventListener('keydown', function(e) {
-    // Si el foco está en el input de búsqueda TV, no interceptar nada
+    // ── INPUT DE BÚSQUEDA TV: manejo completo aquí ──
     if(document.activeElement && document.activeElement.id === 'tvSearchBarInput') {
-      if(e.keyCode !== 27) return; // solo dejar pasar Escape
+      if(e.keyCode === 27) { // Escape
+        closeTvSearchBar();
+      } else if(e.keyCode === 13 || e.keyCode === 65376 || e.keyCode === 10182) {
+        // Enter / Completado Samsung
+        e.preventDefault();
+        e.stopPropagation();
+        var inp = document.getElementById('tvSearchBarInput');
+        if(inp && inp.value.trim()) {
+          var query = inp.value.trim();
+          inp.blur();
+          // Cerrar barra ANTES de buscar para liberar el foco
+          var bar = document.getElementById('tvSearchBar');
+          if(bar) bar.classList.remove('open');
+          document.body.classList.remove('tv-search-open');
+          // Ejecutar búsqueda
+          doSearchUnified(query).then(function(){
+            setTimeout(function(){
+              var firstCard = document.querySelector(
+                '#searchPage .card, #searchPage .channel-card-compact'
+              );
+              if(firstCard) {
+                firstCard.setAttribute('tabindex','0');
+                setFocus(firstCard);
+              }
+            }, 400);
+          });
+        }
+      } else if(e.keyCode === 40) {
+        // Flecha abajo desde el input → saltar a resultados directamente
+        e.preventDefault();
+        e.stopPropagation();
+        var firstCard = document.querySelector(
+          '#searchPage .card, #searchPage .channel-card-compact'
+        );
+        if(firstCard) {
+          var inp2 = document.getElementById('tvSearchBarInput');
+          if(inp2) inp2.blur();
+          firstCard.setAttribute('tabindex','0');
+          setFocus(firstCard);
+        }
+      }
+      return; // No procesar nada más
     }
+
     var inputActive = document.activeElement &&
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
@@ -6550,16 +6592,13 @@ function closeTvSearchBar(){
         okHoldTimer = null;
       }, 2000);
       
-      // Si estamos en el player sin cursor, SOLO iniciamos el timer
-      // y permitimos que el click pase al iframe
       if (playerActivo() && !cursorMode) {
-        return; // Dejar que el iframe reciba el click
+        return;
       }
     }
 
     if (inputActive) return;
 
-    // MODO CURSOR - todas las flechas mueven el cursor
     if (cursorMode) {
       heldKeys[e.keyCode] = true;
       if ([37,38,39,40].indexOf(e.keyCode) !== -1) {
@@ -6571,13 +6610,10 @@ function closeTvSearchBar(){
       return;
     }
 
-    // Player activo sin cursor - permitir todas las teclas (excepto OK que ya se manejó arriba)
     if (playerActivo() && !cursorMode) {
-      // Las flechas y otras teclas pasan al iframe libremente
       return;
     }
 
-    // BACK fuera del player
     if (e.keyCode === 10009 || e.key === 'XF86Back' || e.key === 'Back') {
       e.preventDefault();
       var detail = document.getElementById('detailPage');
@@ -6608,14 +6644,12 @@ function closeTvSearchBar(){
       return;
     }
 
-    // D-PAD normal (solo cuando cursor está desactivado)
     switch(e.keyCode) {
       case 37: e.preventDefault(); findNearest('left');  break;
       case 38: e.preventDefault(); findNearest('up');    break;
       case 39: e.preventDefault(); findNearest('right'); break;
       case 40: e.preventDefault(); findNearest('down');  break;
       case 13:
-        // NO prevenir aquí - el hold detector ya lo manejó arriba
         break;
     }
   }, true);
