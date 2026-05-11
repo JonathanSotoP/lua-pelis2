@@ -2207,12 +2207,12 @@
     <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
   </svg>
   <input type="text" id="tvSearchBarInput"
-         placeholder="Buscar películas, series, canales..."
-         autocomplete="off" enterkeyhint="search" spellcheck="false"
-         oninput="handleSearch(this.value)"
-         onkeydown="if(event.key==='Escape')closeTvSearchBar();if(event.key==='Enter'&&this.value.trim()){handleSearch(this.value);setTimeout(function(){closeTvSearchBar()},600)}"
-         onfocus="try{AndroidKeyboard.showKeyboard()}catch(e){}"
-         onblur="try{AndroidKeyboard.hideKeyboard()}catch(e){}">
+       placeholder="Buscar películas, series, canales..."
+       autocomplete="off" enterkeyhint="search" spellcheck="false"
+       onkeydown="if(event.key==='Escape')closeTvSearchBar();"
+       onchange="if(this.value.trim()){handleSearch(this.value);}"
+       onfocus="try{AndroidKeyboard.showKeyboard()}catch(e){}"
+       onblur="try{AndroidKeyboard.hideKeyboard()}catch(e){}">
   <button class="tv-search-bar-close" onclick="closeTvSearchBar()" title="Cerrar búsqueda">✕</button>
 </div>
 
@@ -4247,14 +4247,29 @@
     document.getElementById('resultsTitle').textContent='';
     document.getElementById('resultsCount').textContent='Escribe para buscar...';
     setTimeout(function(){
-      var inp = document.getElementById('tvSearchBarInput');
-      if(!inp) return;
-      inp.value = '';
-      inp.focus();
-      inp.select();
-      try { AndroidKeyboard.showKeyboard(); } catch(e) {}
-      try { AndroidStorage.showKeyboard(); }  catch(e) {}
-    }, 150);
+  var inp = document.getElementById('tvSearchBarInput');
+  if(!inp) return;
+  inp.value = '';
+  inp.focus();
+  inp.select();
+  try { AndroidKeyboard.showKeyboard(); } catch(e) {}
+  try { AndroidStorage.showKeyboard(); }  catch(e) {}
+
+  // Tizen: "Completado" dispara 'change' o 'search'
+  // Registrar solo una vez para no duplicar listeners
+  if(!inp._tizenSearchBound) {
+    inp._tizenSearchBound = true;
+    inp.addEventListener('search', function() {
+      if(inp.value.trim()) handleSearch(inp.value);
+    });
+    // Samsung a veces dispara keyCode 65376 (tecla Completado)
+    inp.addEventListener('keydown', function(e) {
+      if(e.keyCode === 65376 || e.keyCode === 10182) {
+        if(inp.value.trim()) handleSearch(inp.value);
+      }
+    });
+  }
+}, 150);
   }
 
   function closeTvSearchBar(){
