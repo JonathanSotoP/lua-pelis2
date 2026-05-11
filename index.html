@@ -6407,7 +6407,7 @@ function closeTvSearchBar(){
 
   function moveCursor(dx, dy) {
     cursorX = Math.max(0, Math.min(window.innerWidth,  cursorX + dx));
-    cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + (dy * 0.4)));
+    cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + (dy * 0.5)));
     cursor.style.left = cursorX + 'px';
     cursor.style.top  = cursorY + 'px';
   }
