@@ -2207,9 +2207,9 @@
     <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
   </svg>
   <input type="text" id="tvSearchBarInput"
-         placeholder="Buscar películas, series, canales..."
-         autocomplete="off" spellcheck="false"
-         onkeydown="if(event.key==='Escape')closeTvSearchBar();">
+       placeholder="Buscar películas, series, canales..."
+       autocomplete="off" spellcheck="false"
+       onkeydown="if(event.key==='Escape'){closeTvSearchBar();}else if(event.keyCode===13||event.keyCode===65376||event.keyCode===10182){event.stopPropagation();tvDoSearch();}">
   <button class="tv-search-bar-close tv-search-bar-go"
           onclick="tvDoSearch()"
           style="width:auto;padding:0 16px;border-radius:20px;background:var(--accent);color:#000;font-weight:700;font-size:0.82rem;border:none;">
@@ -4256,11 +4256,21 @@ function openTvSearchBar(){
   document.getElementById('resultsTitle').textContent='';
   document.getElementById('resultsCount').textContent='Escribe para buscar...';
   setTimeout(function(){
-    var inp = document.getElementById('tvSearchBarInput');
-    if(!inp) return;
-    inp.value = '';
-    inp.focus();
-  }, 150);
+  var inp = document.getElementById('tvSearchBarInput');
+  if(!inp) return;
+  inp.value = '';
+  inp.focus();
+  // Registrar Enter/Completado solo una vez
+  if(!inp._searchBound){
+    inp._searchBound = true;
+    inp.addEventListener('keydown', function(e){
+      if(e.keyCode===13||e.keyCode===65376||e.keyCode===10182){
+        e.stopPropagation();
+        tvDoSearch();
+      }
+    }, true); // capture:true para que tenga prioridad sobre el handler global
+  }
+}, 150);
 }
 
 function closeTvSearchBar(){
@@ -6506,6 +6516,10 @@ function closeTvSearchBar(){
   }
 
   document.addEventListener('keydown', function(e) {
+    // Si el foco está en el input de búsqueda TV, no interceptar nada
+    if(document.activeElement && document.activeElement.id === 'tvSearchBarInput') {
+      if(e.keyCode !== 27) return; // solo dejar pasar Escape
+    }
     var inputActive = document.activeElement &&
       (document.activeElement.tagName === 'INPUT' ||
        document.activeElement.tagName === 'TEXTAREA');
